@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+dist/
+.DS_Store
+
+# Claude internal cache (Personal memory)
+.claude/sessions/
+.claude/config.json
+
+# Keep rules but ignore local environment logs
+!.claude/rules/

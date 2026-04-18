@@ -1,0 +1,433 @@
+{
+  "metadata": {
+    "title": "The Shepherd's Ledger",
+    "setting": "Bisesero Hills, Western Province, Rwanda",
+    "year_discovery": 2026,
+    "year_events": 1994,
+    "duration_days": "The 100 Days of the Genocide"
+  },
+  "nodes": [
+    {
+      "id": "act_1_arrival",
+      "type": "scene",
+      "act": 1,
+      "title": "Return to the Compound",
+      "description": "Player arrives at abandoned family compound in modern day 2026",
+      "location": "family_compound",
+      "actions": [
+        {
+          "type": "dialogue",
+          "content": "Why did Grandpa never talk about this place?"
+        }
+      ],
+      "next": ["act_1_explore"]
+    },
+    {
+      "id": "act_1_explore",
+      "type": "puzzle",
+      "act": 1,
+      "title": "Explore the Ruins",
+      "description": "Navigate overgrowth and decay to access the main house",
+      "location": "family_compound",
+      "requiredFlags": [],
+      "unlocksFlags": ["act_1_started"],
+      "next": ["act_1_find_ledger"]
+    },
+    {
+      "id": "act_1_find_ledger",
+      "type": "event",
+      "act": 1,
+      "title": "Discover the Ledger",
+      "description": "Find the shepherd's ledger in the family shrine",
+      "location": "family_shrine",
+      "requiredFlags": ["act_1_started"],
+      "unlocksFlags": ["act_1_complete", "ledger_discovered"],
+      "next": ["act_2_begin_exploration"]
+    },
+    {
+      "id": "act_2_begin_exploration",
+      "type": "scene",
+      "act": 2,
+      "title": "Evidence Gathering",
+      "description": "Free exploration to gather evidence across all three possible paths",
+      "location": "bisesero_hills",
+      "requiredFlags": ["ledger_discovered"],
+      "unlocksFlags": ["act_2_started"],
+      "next": ["act_2_evidence_cellar", "act_2_evidence_lake", "act_2_evidence_ravine", "act_2_evidence_compound"]
+    },
+    {
+      "id": "act_2_evidence_cellar",
+      "type": "puzzle",
+      "act": 2,
+      "title": "The Hidden Cellar",
+      "description": "Discover hidden cellar beneath family well with evidence of hiding",
+      "location": "family_compound_cellar",
+      "requiredFlags": ["act_2_started"],
+      "unlocksFlags": ["found_cellar_evidence", "evidence_hider_path"],
+      "next": ["act_2_check_all_evidence"]
+    },
+    {
+      "id": "act_2_evidence_lake",
+      "type": "puzzle",
+      "act": 2,
+      "title": "The Lake Shore",
+      "description": "Find boat paddle, maps, and evidence of escape routes across Lake Kivu",
+      "location": "lake_shore",
+      "requiredFlags": ["act_2_started"],
+      "unlocksFlags": ["found_boat_evidence", "evidence_escapist_path"],
+      "next": ["act_2_check_all_evidence"]
+    },
+    {
+      "id": "act_2_evidence_ravine",
+      "type": "puzzle",
+      "act": 2,
+      "title": "The Ravine",
+      "description": "Locate the observer's vantage point with evidence of watching/silence",
+      "location": "ravine_vantage",
+      "requiredFlags": ["act_2_started"],
+      "unlocksFlags": ["found_observer_evidence", "evidence_observer_path"],
+      "next": ["act_2_check_all_evidence"]
+    },
+    {
+      "id": "act_2_evidence_compound",
+      "type": "puzzle",
+      "act": 2,
+      "title": "Family Records",
+      "description": "Collect photographs, documents, and personal items from the compound",
+      "location": "family_compound",
+      "requiredFlags": ["act_2_started"],
+      "unlocksFlags": ["found_family_records"],
+      "next": ["act_2_check_all_evidence"]
+    },
+    {
+      "id": "act_2_check_all_evidence",
+      "type": "event",
+      "act": 2,
+      "title": "Evidence Checkpoint",
+      "description": "System check: all evidence gathered?",
+      "requiredFlags": ["found_cellar_evidence", "found_boat_evidence", "found_observer_evidence", "found_family_records"],
+      "unlocksFlags": ["all_evidence_found"],
+      "next": ["act_3_the_choice"]
+    },
+    {
+      "id": "act_3_the_choice",
+      "type": "branch",
+      "act": 3,
+      "title": "The Choice",
+      "description": "Player interprets evidence and commits to one of three narrative paths",
+      "location": "family_compound",
+      "requiredFlags": ["all_evidence_found"],
+      "options": [
+        {
+          "id": "choice_hider",
+          "text": "He hid people. I found the cellar.",
+          "leads_to": "act_3a_hider_begin",
+          "unlocksFlags": ["path_hider_chosen"],
+          "narrative": "The Path of the Righteous"
+        },
+        {
+          "id": "choice_escapist",
+          "text": "He helped people escape. I found the boat paddle.",
+          "leads_to": "act_3b_escapist_begin",
+          "unlocksFlags": ["path_escapist_chosen"],
+          "narrative": "The Path of the Survivor"
+        },
+        {
+          "id": "choice_observer",
+          "text": "He stayed neutral to survive. I found his observer's notes.",
+          "leads_to": "act_3c_observer_begin",
+          "unlocksFlags": ["path_silent_chosen"],
+          "narrative": "The Path of the Silent"
+        }
+      ]
+    },
+    {
+      "id": "act_3a_hider_begin",
+      "type": "scene",
+      "act": 3,
+      "title": "The Hider Path Begins",
+      "description": "Enter the Path of the Righteous - uncover the story of hiding",
+      "location": "family_compound_cellar",
+      "requiredFlags": ["path_hider_chosen"],
+      "unlocksFlags": ["path_a_started"],
+      "next": ["act_3a_puzzle_1"]
+    },
+    {
+      "id": "act_3a_puzzle_1",
+      "type": "puzzle",
+      "act": 3,
+      "title": "Cellar Reconstruction",
+      "description": "Match hidden neighbor artifacts to names and ledger entries",
+      "location": "family_compound_cellar",
+      "requiredFlags": ["path_a_started"],
+      "unlocksFlags": ["puzzle_a1_complete"],
+      "next": ["act_3a_puzzle_2"]
+    },
+    {
+      "id": "act_3a_puzzle_2",
+      "type": "puzzle",
+      "act": 3,
+      "title": "Evidence of Risk",
+      "description": "Piece together militia patrols, cellar vulnerabilities, supply runs",
+      "location": "family_compound_area",
+      "requiredFlags": ["puzzle_a1_complete"],
+      "unlocksFlags": ["puzzle_a2_complete"],
+      "next": ["act_3a_puzzle_3"]
+    },
+    {
+      "id": "act_3a_puzzle_3",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Cost",
+      "description": "Discover post-1994 letter from hidden neighbor; uncover final journal entry",
+      "location": "family_shrine",
+      "requiredFlags": ["puzzle_a2_complete"],
+      "unlocksFlags": ["puzzle_a3_complete"],
+      "next": ["act_3a_reflection"]
+    },
+    {
+      "id": "act_3a_reflection",
+      "type": "scene",
+      "act": 3,
+      "title": "Reflection: The Burden of Hiding",
+      "description": "Player stands in cellar, contemplates the weight of Grandpa's choice",
+      "location": "family_compound_cellar",
+      "requiredFlags": ["puzzle_a3_complete"],
+      "unlocksFlags": ["path_a_reflection_complete"],
+      "next": ["act_3a_ending"]
+    },
+    {
+      "id": "act_3a_ending",
+      "type": "ending",
+      "act": 3,
+      "title": "The Ledger Revealed: Hider",
+      "description": "Final journal entry reveals the depth of Grandpa's sacrifice",
+      "location": "family_shrine",
+      "requiredFlags": ["path_a_reflection_complete"],
+      "unlocksFlags": ["path_a_complete"],
+      "next": ["act_4_remembrance"]
+    },
+    {
+      "id": "act_3b_escapist_begin",
+      "type": "scene",
+      "act": 3,
+      "title": "The Escapist Path Begins",
+      "description": "Enter the Path of the Survivor - uncover the story of escape",
+      "location": "lake_shore",
+      "requiredFlags": ["path_escapist_chosen"],
+      "unlocksFlags": ["path_b_started"],
+      "next": ["act_3b_puzzle_1"]
+    },
+    {
+      "id": "act_3b_puzzle_1",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Lake Route",
+      "description": "Piece together safe houses, villages, and checkpoints on escape route",
+      "location": "lake_shore",
+      "requiredFlags": ["path_b_started"],
+      "unlocksFlags": ["puzzle_b1_complete"],
+      "next": ["act_3b_puzzle_2"]
+    },
+    {
+      "id": "act_3b_puzzle_2",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Selection",
+      "description": "Discover who made it across and who didn't; understand the choices",
+      "location": "family_compound",
+      "requiredFlags": ["puzzle_b1_complete"],
+      "unlocksFlags": ["puzzle_b2_complete"],
+      "next": ["act_3b_puzzle_3"]
+    },
+    {
+      "id": "act_3b_puzzle_3",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Journey",
+      "description": "Retrace escape route; discover dangers, survivors' accounts, loss",
+      "location": "bisesero_hills",
+      "requiredFlags": ["puzzle_b2_complete"],
+      "unlocksFlags": ["puzzle_b3_complete"],
+      "next": ["act_3b_puzzle_4"]
+    },
+    {
+      "id": "act_3b_puzzle_4",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Afterward",
+      "description": "Find post-1994 letters from survivors and the unnamed group that wasn't saved",
+      "location": "family_shrine",
+      "requiredFlags": ["puzzle_b3_complete"],
+      "unlocksFlags": ["puzzle_b4_complete"],
+      "next": ["act_3b_reflection"]
+    },
+    {
+      "id": "act_3b_reflection",
+      "type": "scene",
+      "act": 3,
+      "title": "Reflection: The Cost of Escape",
+      "description": "Player stands at water's edge, contemplates who survived and who didn't",
+      "location": "lake_shore",
+      "requiredFlags": ["puzzle_b4_complete"],
+      "unlocksFlags": ["path_b_reflection_complete"],
+      "next": ["act_3b_ending"]
+    },
+    {
+      "id": "act_3b_ending",
+      "type": "ending",
+      "act": 3,
+      "title": "The Ledger Revealed: Escapist",
+      "description": "Final journal entry reveals 87 names saved and the ones left behind",
+      "location": "lake_shore",
+      "requiredFlags": ["path_b_reflection_complete"],
+      "unlocksFlags": ["path_b_complete"],
+      "next": ["act_4_remembrance"]
+    },
+    {
+      "id": "act_3c_observer_begin",
+      "type": "scene",
+      "act": 3,
+      "title": "The Observer Path Begins",
+      "description": "Enter the Path of the Silent - uncover the story of witness and silence",
+      "location": "ravine_vantage",
+      "requiredFlags": ["path_silent_chosen"],
+      "unlocksFlags": ["path_c_started"],
+      "next": ["act_3c_puzzle_1"]
+    },
+    {
+      "id": "act_3c_puzzle_1",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Vantage Point",
+      "description": "Map all events visible from the ravine; understand what Grandpa saw",
+      "location": "ravine_vantage",
+      "requiredFlags": ["path_c_started"],
+      "unlocksFlags": ["puzzle_c1_complete"],
+      "next": ["act_3c_puzzle_2"]
+    },
+    {
+      "id": "act_3c_puzzle_2",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Moral Inventory",
+      "description": "Discover what Grandpa knew, where people were, what he didn't reveal",
+      "location": "ravine_area",
+      "requiredFlags": ["puzzle_c1_complete"],
+      "unlocksFlags": ["puzzle_c2_complete"],
+      "next": ["act_3c_puzzle_3"]
+    },
+    {
+      "id": "act_3c_puzzle_3",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Rationalization",
+      "description": "Find unsent letters, journal entries justifying inaction and silence",
+      "location": "family_shrine",
+      "requiredFlags": ["puzzle_c2_complete"],
+      "unlocksFlags": ["puzzle_c3_complete"],
+      "next": ["act_3c_puzzle_4"]
+    },
+    {
+      "id": "act_3c_puzzle_4",
+      "type": "puzzle",
+      "act": 3,
+      "title": "The Aftermath",
+      "description": "Discover visitor's account of Grandpa's isolation post-1994; read final question",
+      "location": "family_compound",
+      "requiredFlags": ["puzzle_c3_complete"],
+      "unlocksFlags": ["puzzle_c4_complete"],
+      "next": ["act_3c_reflection"]
+    },
+    {
+      "id": "act_3c_reflection",
+      "type": "scene",
+      "act": 3,
+      "title": "Reflection: The Weight of Silence",
+      "description": "Player stands at observer's vantage point; contemplates complicity and guilt",
+      "location": "ravine_vantage",
+      "requiredFlags": ["puzzle_c4_complete"],
+      "unlocksFlags": ["path_c_reflection_complete"],
+      "next": ["act_3c_ending"]
+    },
+    {
+      "id": "act_3c_ending",
+      "type": "ending",
+      "act": 3,
+      "title": "The Ledger Revealed: Observer",
+      "description": "Final journal entry ends with a question: Was remaining enough? Was silence a choice?",
+      "location": "ravine_vantage",
+      "requiredFlags": ["path_c_reflection_complete"],
+      "unlocksFlags": ["path_c_complete"],
+      "next": ["act_4_remembrance"]
+    },
+    {
+      "id": "act_4_remembrance",
+      "type": "scene",
+      "act": 4,
+      "title": "Remembrance",
+      "description": "Return to family compound in modern day; reflect on Grandpa's choice and legacy",
+      "location": "family_compound",
+      "requiredFlags": ["path_a_complete", "path_b_complete", "path_c_complete"],
+      "unlocksFlags": ["act_4_started"],
+      "next": ["act_4_conclusion"]
+    },
+    {
+      "id": "act_4_conclusion",
+      "type": "ending",
+      "act": 4,
+      "title": "The Shepherd's Legacy",
+      "description": "Player makes meaning of discovery; game concludes with reflection on survival and choice",
+      "location": "family_compound",
+      "requiredFlags": ["act_4_started"],
+      "unlocksFlags": ["game_complete", "memorialization_complete"],
+      "next": []
+    }
+  ],
+  "edges": [
+    { "from": "act_1_arrival", "to": "act_1_explore" },
+    { "from": "act_1_explore", "to": "act_1_find_ledger" },
+    { "from": "act_1_find_ledger", "to": "act_2_begin_exploration" },
+
+    { "from": "act_2_begin_exploration", "to": "act_2_evidence_cellar" },
+    { "from": "act_2_begin_exploration", "to": "act_2_evidence_lake" },
+    { "from": "act_2_begin_exploration", "to": "act_2_evidence_ravine" },
+    { "from": "act_2_begin_exploration", "to": "act_2_evidence_compound" },
+
+    { "from": "act_2_evidence_cellar", "to": "act_2_check_all_evidence" },
+    { "from": "act_2_evidence_lake", "to": "act_2_check_all_evidence" },
+    { "from": "act_2_evidence_ravine", "to": "act_2_check_all_evidence" },
+    { "from": "act_2_evidence_compound", "to": "act_2_check_all_evidence" },
+
+    { "from": "act_2_check_all_evidence", "to": "act_3_the_choice" },
+
+    { "from": "act_3_the_choice", "to": "act_3a_hider_begin" },
+    { "from": "act_3_the_choice", "to": "act_3b_escapist_begin" },
+    { "from": "act_3_the_choice", "to": "act_3c_observer_begin" },
+
+    { "from": "act_3a_hider_begin", "to": "act_3a_puzzle_1" },
+    { "from": "act_3a_puzzle_1", "to": "act_3a_puzzle_2" },
+    { "from": "act_3a_puzzle_2", "to": "act_3a_puzzle_3" },
+    { "from": "act_3a_puzzle_3", "to": "act_3a_reflection" },
+    { "from": "act_3a_reflection", "to": "act_3a_ending" },
+    { "from": "act_3a_ending", "to": "act_4_remembrance" },
+
+    { "from": "act_3b_escapist_begin", "to": "act_3b_puzzle_1" },
+    { "from": "act_3b_puzzle_1", "to": "act_3b_puzzle_2" },
+    { "from": "act_3b_puzzle_2", "to": "act_3b_puzzle_3" },
+    { "from": "act_3b_puzzle_3", "to": "act_3b_puzzle_4" },
+    { "from": "act_3b_puzzle_4", "to": "act_3b_reflection" },
+    { "from": "act_3b_reflection", "to": "act_3b_ending" },
+    { "from": "act_3b_ending", "to": "act_4_remembrance" },
+
+    { "from": "act_3c_observer_begin", "to": "act_3c_puzzle_1" },
+    { "from": "act_3c_puzzle_1", "to": "act_3c_puzzle_2" },
+    { "from": "act_3c_puzzle_2", "to": "act_3c_puzzle_3" },
+    { "from": "act_3c_puzzle_3", "to": "act_3c_puzzle_4" },
+    { "from": "act_3c_puzzle_4", "to": "act_3c_reflection" },
+    { "from": "act_3c_reflection", "to": "act_3c_ending" },
+    { "from": "act_3c_ending", "to": "act_4_remembrance" },
+
+    { "from": "act_4_remembrance", "to": "act_4_conclusion" }
+  ]
+}

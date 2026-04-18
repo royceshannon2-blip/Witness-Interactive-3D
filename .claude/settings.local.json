@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm STORY_TREE.md)",
+      "Bash(mv STORY_TREE_SHEPHERD_LEDGER.md NARRATIVE.md)",
+      "Bash(mv SETTING_BISESERO.md WORLD.md)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
