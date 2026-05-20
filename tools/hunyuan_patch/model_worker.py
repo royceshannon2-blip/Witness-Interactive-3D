@@ -55,32 +55,48 @@ except ImportError:
 except Exception as e:
     print(f"Warning: Failed to apply torchvision fix: {e}")
 
-# Patch torchvision's _functional_tensor.resize so tensor resize operations
-# happen on CPU instead of CUDA. RTX 5090 (sm_120 / Blackwell) is missing
-# from the torchvision wheel's compiled CUDA kernels, causing a
-# "no kernel image is available for execution on the device" crash in
-# conditioner.py's encode_cond when it runs transforms.Resize on a CUDA
-# tensor. Moving to CPU for the resize and restoring the device is safe;
-# the conditioner moves the result to GPU immediately after anyway.
+# The torchvision wheel bundled in this image was compiled without sm_120
+# (Blackwell / RTX 5090) CUDA kernels. Every function in
+# torchvision.transforms._functional_tensor that touches a CUDA tensor
+# raises "no kernel image is available for execution on the device".
+# Patch the entire module: wrap every public callable so CUDA tensors are
+# moved to CPU before the call and the result is moved back. The conditioner
+# in hy3dshape re-uploads to GPU immediately, so the round-trip is safe.
 try:
+    import functools
     import torchvision.transforms._functional_tensor as _ft
-    _orig_ft_resize = _ft.resize
 
-    def _resize_cpu_safe(
-        img: torch.Tensor,
-        size,
-        interpolation: str = "bilinear",
-        antialias=True,
-    ) -> torch.Tensor:
-        if img.is_cuda:
-            device = img.device
-            return _orig_ft_resize(img.cpu(), size, interpolation, antialias).to(device)
-        return _orig_ft_resize(img, size, interpolation, antialias)
+    def _make_cpu_safe(fn):
+        @functools.wraps(fn)
+        def _wrapper(*args, **kwargs):
+            cuda_tensors = [(i, a) for i, a in enumerate(args)
+                            if isinstance(a, torch.Tensor) and a.is_cuda]
+            if not cuda_tensors:
+                return fn(*args, **kwargs)
+            device = cuda_tensors[0][1].device
+            args = list(args)
+            for i, a in cuda_tensors:
+                args[i] = a.cpu()
+            result = fn(*args, **kwargs)
+            if isinstance(result, torch.Tensor):
+                result = result.to(device)
+            return result
+        return _wrapper
 
-    _ft.resize = _resize_cpu_safe
-    print("Applied sm_120 torchvision resize patch (CPU offload)")
+    _patched = 0
+    for _name in dir(_ft):
+        if _name.startswith("_"):
+            continue
+        _fn = getattr(_ft, _name)
+        if callable(_fn):
+            try:
+                setattr(_ft, _name, _make_cpu_safe(_fn))
+                _patched += 1
+            except (AttributeError, TypeError):
+                pass
+    print(f"Applied sm_120 torchvision patch: {_patched} ops CPU-offloaded")
 except Exception as _e:
-    print(f"Warning: could not patch torchvision resize: {_e}")
+    print(f"Warning: could not patch torchvision _functional_tensor: {_e}")
 
 from hy3dshape import Hunyuan3DDiTFlowMatchingPipeline
 from hy3dshape.rembg import BackgroundRemover
