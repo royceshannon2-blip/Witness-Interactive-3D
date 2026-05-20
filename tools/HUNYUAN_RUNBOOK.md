@@ -256,9 +256,23 @@ python tools/asset_pipeline.py prop_ledger_book --kind mesh \
   --era shared
 ```
 
-The orchestrator chains: generate → optimize (detached-island strip +
+The orchestrator chains: generate → **AI-projected PBR bake** → optimize (detached-island strip +
 Draco) → register (writes `docs/asset-index.md`) → export (copies to
 `witness-interactive-vite/public/assets/<id>.glb`).
+
+### Stage 2 — AI texture projection (default ON)
+
+After Hunyuan shape generation the pipeline runs `tools/texture_asset.py --ai-project`:
+
+1. **6-view render** — Blender renders beauty + depth EXR for each of 6 canonical views.
+2. **SDXL + ControlNet depth** — ComfyUI projects PBR-styled diffuse maps onto each view (requires ComfyUI running on `:8188`).
+3. **Blender Cycles bake** — Projected maps drive a Principled BSDF bake at 4K (props) / 8K (hero). Outputs albedo, metallic-roughness (R=unused, G=roughness, B=metallic), and normal maps to `processed/textures/<id>/`.
+4. **GLB re-export** — `processed/glb/<id>.textured.glb` is the input to Draco optimization.
+
+To skip the SDXL step and use procedural materials only (faster, lower quality):
+```bash
+python tools/asset_pipeline.py <id> --kind mesh --no-ai-project
+```
 
 ### Refining ref images (stage 0.25)
 
