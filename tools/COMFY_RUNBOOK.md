@@ -18,8 +18,8 @@ driving it from the Witness asset pipeline's stage 0
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 # Expect: NVIDIA GeForce RTX 5090, 32607 MiB, 595.71.05+
 
-# Docker + NVIDIA container toolkit (already verified for Hunyuan)
-docker info | grep -i runtime              # should list "nvidia"
+# ComfyUI process running
+pgrep -af "ComfyUI/main.py" || echo "not running — see §5 to start"
 
 # Pipeline-side tooling
 python3 -c "import requests"               # generate_ref_image.py dependency
@@ -35,83 +35,52 @@ patterns:
   `tools/asset_pipeline.py --auto-ref` does **not** stop Hunyuan
   automatically — the operator does it. This is the safe default for
   batch runs because Flux at hero resolution would OOM otherwise.
-- **Concurrent (default workflow only).** Both containers running.
+- **Concurrent (default workflow only).** Both servers running.
   Hunyuan idle (~8 GB) + Flux default at 1024² (~14 GB) ≈ 22 GB on a
   32 GB card. Works, but a simultaneous Hunyuan generate spike can push
   past the limit. Acceptable for single-asset iteration; risky for batch.
 
 ---
 
-## 1. Image + model layout
+## 1. Model layout
 
-Place these on the host once. The Docker container will bind-mount them.
+All models live under `~/ComfyUI/models/`. The Flux models are already
+downloaded. The SDXL depth ControlNet is still needed for stage 2b (see §5b).
 
 ```
-model_cache/comfyui/
-├── checkpoints/         # standalone checkpoints (unused for Flux)
+~/ComfyUI/models/
+├── checkpoints/
+│   └── sd_xl_base_1.0.safetensors    #  6.5 GB — SDXL (stage 2b) ✅
 ├── unet/
-│   └── flux1-dev.safetensors          # 11.9 GB — Flux.1 [dev] base unet
+│   └── flux1-dev.safetensors          # 11.9 GB — Flux.1 [dev] (stage 0) ✅
 ├── clip/
-│   ├── clip_l.safetensors             # 246 MB — OpenCLIP-L text encoder
-│   ├── t5xxl_fp8_e4m3fn.safetensors   #  4.9 GB — fp8 T5-XXL (default workflow)
-│   └── t5xxl_fp16.safetensors         #  9.8 GB — fp16 T5-XXL (hero workflow)
+│   ├── clip_l.safetensors             #  246 MB — OpenCLIP-L ✅
+│   ├── t5xxl_fp8_e4m3fn.safetensors   #  4.9 GB — fp8 T5-XXL (default workflow) ✅
+│   └── t5xxl_fp16.safetensors         #  9.8 GB — fp16 T5-XXL (hero workflow) ✅
 ├── vae/
-│   └── ae.safetensors                 # 320 MB — Flux VAE
-└── output/                            # ComfyUI writes generated images here
+│   └── ae.safetensors                 #  320 MB — Flux VAE ✅
+└── controlnet/
+    └── controlnet-depth-sdxl-1.0.safetensors  # 2.5 GB — depth ControlNet ⬜ needed
 ```
 
-Download links (HuggingFace, gated — you must accept the Flux.1 [dev] licence):
+If you need to re-download the Flux models (HuggingFace gated — accept the licence first):
 
 ```bash
-# After `huggingface-cli login` with a Flux-accepted account:
-cd model_cache/comfyui
 huggingface-cli download black-forest-labs/FLUX.1-dev flux1-dev.safetensors \
-  --local-dir unet --local-dir-use-symlinks False
+  --local-dir ~/ComfyUI/models/unet/
 huggingface-cli download black-forest-labs/FLUX.1-dev ae.safetensors \
-  --local-dir vae --local-dir-use-symlinks False
+  --local-dir ~/ComfyUI/models/vae/
 huggingface-cli download comfyanonymous/flux_text_encoders clip_l.safetensors \
-  --local-dir clip --local-dir-use-symlinks False
-huggingface-cli download comfyanonymous/flux_text_encoders t5xxl_fp8_e4m3fn.safetensors \
-  --local-dir clip --local-dir-use-symlinks False
-huggingface-cli download comfyanonymous/flux_text_encoders t5xxl_fp16.safetensors \
-  --local-dir clip --local-dir-use-symlinks False
+  t5xxl_fp8_e4m3fn.safetensors t5xxl_fp16.safetensors \
+  --local-dir ~/ComfyUI/models/clip/
 ```
 
 ---
 
 ## 2. Start the API server
 
-ComfyUI runs as a Docker container exposing port 8188 (its default).
-We use the upstream `yanwk/comfyui-boot:latest` image because it ships
-with PyTorch 2.5+ built for CUDA 12.6 (required for sm_120 / Blackwell).
-
-### 2a. Foreground (development — see live logs, Ctrl-C to stop)
-
-```bash
-cd /home/royce3/Desktop/Witness-Interactive-3D
-docker run --rm --gpus all \
-  -p 8188:8188 \
-  -v "$PWD/model_cache/comfyui:/root/ComfyUI/models" \
-  -v "$PWD/model_cache/comfyui/output:/root/ComfyUI/output" \
-  --name witness-comfy \
-  yanwk/comfyui-boot:latest
-```
-
-Wait for `To see the GUI go to: http://0.0.0.0:8188`.
-
-### 2b. Detached (production / batch)
-
-```bash
-cd /home/royce3/Desktop/Witness-Interactive-3D
-docker run --rm -d --gpus all \
-  -p 8188:8188 \
-  -v "$PWD/model_cache/comfyui:/root/ComfyUI/models" \
-  -v "$PWD/model_cache/comfyui/output:/root/ComfyUI/output" \
-  --name witness-comfy \
-  yanwk/comfyui-boot:latest
-
-docker logs -f witness-comfy        # Ctrl-C just stops following; server keeps running
-```
+ComfyUI runs as a bare-metal Python process (installed at `/home/royce3/ComfyUI/`),
+not in Docker. See §5 for start / stop commands.
 
 ---
 
@@ -273,11 +242,11 @@ there is no simultaneous heavy load.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `curl http://localhost:8188/system_stats` → connection refused | Container still warming up or not started. | `docker ps --filter name=witness-comfy` — should show `0.0.0.0:8188->8188/tcp`. First boot pulls torch wheels; allow 3–5 min. |
-| `generate_ref_image.py` reports `ComfyUI unreachable` | Container not running, port conflict, or different `--server`. | Verify port mapping; pass `--server http://localhost:<port>` if remapped. |
-| `ComfyUI reported error` with `Could not find weights … flux1-dev.safetensors` | Model files not present in the bind-mounted `unet/` etc. | Re-check §1 layout. Each file must be under the exact subdirectory expected by ComfyUI. |
-| `CUDA error: no kernel image is available for execution on the device` | Container shipped PyTorch built for < sm_120. | Switch to `yanwk/comfyui-boot:latest` (or any image with torch ≥ 2.5 + CUDA 12.6). Older Comfy images are the most common cause. |
-| `Generation failed: CUDA out of memory` | Hunyuan and Flux both loaded; one of them is hot. | Run sequentially: `docker stop witness-hunyuan`, run Flux, restart Hunyuan. Or drop to default workflow (1024²). |
+| `curl http://localhost:8188/system_stats` → connection refused | ComfyUI process not running. | `pgrep -af "ComfyUI/main.py"` — if empty, start it with the command in §5. Allow ~15 s for model scan on first boot. |
+| `generate_ref_image.py` reports `ComfyUI unreachable` | Process not running or port conflict. | Check `pgrep -af "ComfyUI/main.py"`; pass `--server http://localhost:<port>` if you started on a different port. |
+| `ComfyUI reported error` with `Could not find weights … flux1-dev.safetensors` | Model file missing from `~/ComfyUI/models/unet/`. | Re-check §1 layout. Each file must be in the exact subdirectory ComfyUI expects. |
+| `CUDA error: no kernel image is available for execution on the device` | ComfyUI venv's PyTorch lacks sm_120 kernels. | `~/ComfyUI/venv/bin/pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu128` then restart. |
+| `Generation failed: CUDA out of memory` | Hunyuan and Flux both active simultaneously. | Stop the Hunyuan container (`docker stop witness-hunyuan`), run Flux, then restart Hunyuan. Or use the default 1024² workflow instead of hero. |
 | Output drifts from `_STYLE_GUIDE.md` palette | Seed/prompt drifted or guidance too high. | Stick with seed defaults; lower `FluxGuidance.guidance` from 3.5 to 2.5 for less saturated output. Edit the workflow JSON. |
 | Ref.png exists but `generate_ref_image.py` no-ops | Pipeline default is non-destructive. | Add `--force` to overwrite. |
 
