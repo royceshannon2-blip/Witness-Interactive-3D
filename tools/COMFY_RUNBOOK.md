@@ -128,8 +128,7 @@ python tools/asset_pipeline.py prop_ledger_book --kind mesh --auto-ref --era sha
 
 ### Batch all Phase 1 assets that lack a ref.png:
 
-```bash
-set -e
+```fish
 for id in \
   structure_rugo_main_house \
   structure_rugo_tin_roof \
@@ -143,10 +142,10 @@ for id in \
   vegetation_elephant_grass \
   prop_ledger_book \
   prop_altar_photo_frame \
-  prop_altar_candle ; do
+  prop_altar_candle
     echo "── $id ──"
-    python tools/generate_ref_image.py "$id" || echo "FAIL $id"
-done
+    python tools/generate_ref_image.py $id; or echo "FAIL $id"
+end
 ```
 
 ---
@@ -155,7 +154,7 @@ done
 
 ComfyUI runs as a bare-metal Python process (not Docker) on this machine:
 
-```bash
+```fish
 # Find the PID
 pgrep -af "ComfyUI/main.py"
 
@@ -163,12 +162,16 @@ pgrep -af "ComfyUI/main.py"
 pkill -f "ComfyUI/main.py"
 
 # Start (background, persists after terminal close)
-nohup /home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
+/home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
   --listen 127.0.0.1 --port 8188 \
   > /tmp/comfyui.log 2>&1 &
+disown
 
 # Wait for ready
-until curl -sf http://localhost:8188/system_stats >/dev/null; do sleep 2; done && echo "ready"
+while not curl -sf http://localhost:8188/system_stats >/dev/null 2>&1
+  sleep 2
+end
+echo "ready"
 
 # Tail logs
 tail -f /tmp/comfyui.log
@@ -194,7 +197,7 @@ These must exist under `~/ComfyUI/models/` before the first stage 2b run:
 
 ### Download the missing ControlNet
 
-```bash
+```fish
 huggingface-cli download xinsir/controlnet-depth-sdxl-1.0 \
   diffusion_pytorch_model.safetensors \
   --repo-type model \
@@ -205,9 +208,13 @@ mv /tmp/controlnet-depth-sdxl/diffusion_pytorch_model.safetensors \
 
 # Restart ComfyUI so it scans the new file
 pkill -f "ComfyUI/main.py"
-nohup /home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
+/home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
   --listen 127.0.0.1 --port 8188 > /tmp/comfyui.log 2>&1 &
-until curl -sf http://localhost:8188/system_stats >/dev/null; do sleep 2; done && echo "ready"
+disown
+while not curl -sf http://localhost:8188/system_stats >/dev/null 2>&1
+  sleep 2
+end
+echo "ready"
 
 # Verify
 curl -sf http://localhost:8188/object_info/ControlNetLoader | \
@@ -266,11 +273,13 @@ there is no simultaneous heavy load.
 
 ## 8. Quick reference card
 
-```bash
+```fish
 # Start ComfyUI (bare-metal, persists after terminal close)
-nohup /home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
+/home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
   --listen 127.0.0.1 --port 8188 > /tmp/comfyui.log 2>&1 &
-until curl -sf http://localhost:8188/system_stats >/dev/null; do sleep 2; done && echo "ready"
+disown
+while not curl -sf http://localhost:8188/system_stats >/dev/null 2>&1; sleep 2; end
+echo "ready"
 
 # Stop
 pkill -f "ComfyUI/main.py"
