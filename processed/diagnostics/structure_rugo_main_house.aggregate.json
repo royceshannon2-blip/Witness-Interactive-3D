@@ -1,0 +1,43 @@
+{
+  "asset_id": "structure_rugo_main_house",
+  "overall_valid": true,
+  "gates_ran": [
+    "synth_views"
+  ],
+  "gates_failed": [],
+  "recommended_action": "pass",
+  "per_gate": {
+    "synth_views": {
+      "found": true,
+      "valid": true,
+      "failure_count": 0,
+      "warning_count": 0,
+      "failures": [],
+      "warnings": []
+    },
+    "geometry": {
+      "found": false,
+      "valid": null,
+      "failure_count": 0,
+      "warning_count": 0,
+      "failures": [],
+      "warnings": []
+    },
+    "views": {
+      "found": false,
+      "valid": null,
+      "failure_count": 0,
+      "warning_count": 0,
+      "failures": [],
+      "warnings": []
+    },
+    "pbr": {
+      "found": false,
+      "valid": null,
+      "failure_count": 0,
+      "warning_count": 0,
+      "failures": [],
+      "warnings": []
+    }
+  }
+}

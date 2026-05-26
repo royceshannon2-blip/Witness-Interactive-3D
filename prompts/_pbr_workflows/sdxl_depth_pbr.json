@@ -1,0 +1,89 @@
+{
+  "_comment": "Witness asset pipeline — SDXL + ControlNet (depth) projection workflow for stage 2b. tools/texture_asset.py substitutes __PROMPT__, __VIEW_FILENAME__, __DEPTH_FILENAME__. Outputs a single PBR-styled diffuse image conditioned on the rendered depth pass. Assumes ComfyUI has: sd_xl_base_1.0.safetensors (or fp8 variant) under checkpoints/, control_v11f1p_sd15_depth or SDXL-compatible depth ControlNet under controlnet/.",
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "sd_xl_base_1.0.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "__VIEW_FILENAME__"
+    }
+  },
+  "3": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "__DEPTH_FILENAME__"
+    }
+  },
+  "4": {
+    "class_type": "ControlNetLoader",
+    "inputs": {
+      "control_net_name": "controlnet-depth-sdxl-1.0.safetensors"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "__PROMPT__",
+      "clip": ["1", 1]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "smooth doll, plastic, glossy, vivid, oversaturated, stylized, cartoon, anime, watermark, signature, text, ui overlay, blurry, low quality",
+      "clip": ["1", 1]
+    }
+  },
+  "7": {
+    "class_type": "ControlNetApplyAdvanced",
+    "inputs": {
+      "positive": ["5", 0],
+      "negative": ["6", 0],
+      "control_net": ["4", 0],
+      "image": ["3", 0],
+      "strength": 0.85,
+      "start_percent": 0.0,
+      "end_percent": 0.95
+    }
+  },
+  "8": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["2", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["7", 0],
+      "negative": ["7", 1],
+      "latent_image": ["8", 0],
+      "seed": 481109,
+      "steps": 28,
+      "cfg": 6.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.72
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["9", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "11": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "witness_pbr",
+      "images": ["10", 0]
+    }
+  }
+}

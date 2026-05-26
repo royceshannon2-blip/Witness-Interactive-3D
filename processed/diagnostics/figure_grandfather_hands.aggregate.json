@@ -1,0 +1,58 @@
+{
+  "asset_id": "figure_grandfather_hands",
+  "overall_valid": false,
+  "gates_ran": [
+    "synth_views",
+    "geometry",
+    "views"
+  ],
+  "gates_failed": [
+    "synth_views"
+  ],
+  "recommended_action": "retry_with_new_seed",
+  "per_gate": {
+    "synth_views": {
+      "found": true,
+      "valid": false,
+      "failure_count": 5,
+      "warning_count": 2,
+      "failures": [
+        "[view_1] CLIP semantic gate: P(asset)=0.01 < 0.4 \u2014 view reads more like \"a smooth featureless placeholder block with no surface detail\" than the asset prompt",
+        "[view_3] CLIP semantic gate: P(asset)=0.28 < 0.4 \u2014 view reads more like \"a blank untextured grey 3D primitive\" than the asset prompt",
+        "[view_4] object coverage 0.071 below floor 0.1 \u2014 view shows a sliver of the mesh, likely an edge-on view of a flat depth-card",
+        "[view_4] CLIP semantic gate: P(asset)=0.01 < 0.4 \u2014 view reads more like \"a corrupted distorted 3D render with no recognizable subject\" than the asset prompt",
+        "[view_5] CLIP semantic gate: P(asset)=0.02 < 0.4 \u2014 view reads more like \"a corrupted distorted 3D render with no recognizable subject\" than the asset prompt"
+      ],
+      "warnings": [
+        "[view_1] foreground colour diverges (L1 0.39 from the other views' consensus) \u2014 view may show a different subject/background; check multi-view coherence",
+        "[view_3] foreground colour diverges (L1 0.91 from the other views' consensus) \u2014 view may show a different subject/background; check multi-view coherence"
+      ]
+    },
+    "geometry": {
+      "found": true,
+      "valid": true,
+      "failure_count": 0,
+      "warning_count": 1,
+      "failures": [],
+      "warnings": [
+        "mesh is non-watertight (open edges present) \u2014 acceptable for open-form assets"
+      ]
+    },
+    "views": {
+      "found": true,
+      "valid": true,
+      "failure_count": 0,
+      "warning_count": 0,
+      "failures": [],
+      "warnings": []
+    },
+    "pbr": {
+      "found": false,
+      "valid": null,
+      "failure_count": 0,
+      "warning_count": 0,
+      "failures": [],
+      "warnings": []
+    }
+  }
+}

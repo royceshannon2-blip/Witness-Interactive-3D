@@ -1,96 +1,152 @@
 # CLAUDE.md — Witness Interactive 3D
 
-## Project Overview
-A first-person, photoreal historical interactive work set in the Bisesero Hills, Rwanda. Built with **Babylon.js 9** and **Havok Physics**, with assets generated locally on an RTX 5090 via **Hunyuan3D 2.1** and delivered as 8K-PBR Draco/KTX2 `.glb`.
+A first-person, photoreal historical interactive work set in the Bisesero Hills, Rwanda. Built with **Babylon.js 9** and **Havok Physics**, using **Hunyuan3D 2.1** for asset generation and delivered as 8K-PBR Draco/KTX2 `.glb` files.
 
-The web application lives in `witness-interactive-vite/`. Always prefix terminal commands with `cd witness-interactive-vite`.
+**Web app location:** `witness-interactive-vite/` — all terminal commands should be prefixed with `cd witness-interactive-vite`.
 
-### Where to start reading
-- [`docs/design-docs/MASTER.md`](docs/design-docs/MASTER.md) — umbrella doc, repo map, gap analysis.
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — module boundaries and dependency graph.
-- [`docs/current-state/PROTOTYPE_AUDIT.md`](docs/current-state/PROTOTYPE_AUDIT.md) — honest review of the current `main.ts` prototype. **Read before touching it.**
+---
 
-## Development Workflows
+## Start Here
 
-### Asset Pipeline (Local 5090)
-- **Geometry:** Generate base meshes via local Hunyuan3D 2.1.
-- **Texturing:** Bake 8K PBR maps (albedo, normal, roughness, metalness) in Blender/Substance.
-- **Format:** Export as `.glb` (GLTF) with Draco mesh compression and KTX2 texture compression.
-- **Shaders:** Use the Node Material Editor (NME) for complex historical effects (weathered stone, flowing water).
+1. **New to the codebase?** Read [`docs/design-docs/MASTER.md`](docs/design-docs/MASTER.md) for the umbrella overview, repo map, and gap analysis.
+2. **About to modify the prototype?** Read [`docs/current-state/PROTOTYPE_AUDIT.md`](docs/current-state/PROTOTYPE_AUDIT.md) first — it documents current assumptions and known limitations.
+3. **Need the module map?** See [`ARCHITECTURE.md`](ARCHITECTURE.md) for dependency graphs and component boundaries.
 
-See [`docs/design-docs/ASSET_PIPELINE.md`](docs/design-docs/ASSET_PIPELINE.md) for the full pipeline spec.
+---
 
-### Physics (Havok)
-- Initialize `HavokPhysics()` before scene creation.
-- Use `PhysicsAggregate` for all interactive historical artifacts.
-- Default gravity: `new BABYLON.Vector3(0, -9.81, 0)`.
-- **Status:** not yet installed. Add `@babylonjs/havok` before implementing `src/engine/Physics.ts`.
+## By Topic
 
-## Narrative Architecture
+### Project Vision & Design
+- **[PRD](docs/design-docs/PRD.md)** — product requirements and core narrative hooks.
+- **[WORLD](docs/design-docs/WORLD.md)** — environment, geography, and setting.
+- **[PUZZLE_DESIGN](docs/design-docs/PUZZLE_DESIGN.md)** — puzzle mechanics and player interaction.
+- **[OPENING_SEQUENCE](docs/design-docs/OPENING_SEQUENCE.md)** — first-time player experience.
 
-All narrative/branching logic is separated from 3D rendering code. Full spec in [`docs/design-docs/NARRATIVE.md`](docs/design-docs/NARRATIVE.md) and [`witness-interactive-vite/src/narrative/README.md`](witness-interactive-vite/src/narrative/README.md).
+### Asset & Technical Pipeline
+- **[ASSET_PIPELINE](docs/design-docs/ASSET_PIPELINE.md)** — full spec for generating and managing 3D assets locally (mesh, splat, tileset, navmesh, NME, animated).
+  - **Entry point:** `python tools/witness.py generate <id>` — see `.claude/rules/asset-pipeline.md` for the normative rule.
+- **[ASSET_GENERATION_OVERVIEW](docs/design-docs/ASSET_GENERATION_OVERVIEW.md)** — quick walkthrough of the generation stages.
+- **[asset-index](docs/asset-index.md)** — registry of all generated assets.
 
-- **StateManager** (`src/narrative/StateManager.ts`): Global game state, flags, progress. Serializable for save/load.
-- **Actions** (`src/narrative/Actions.ts`): Event bus bridging story branches to 3D events (audio, camera, animation).
-- **NarrativeController** (`src/narrative/NarrativeController.ts`): High-level API for scenes.
-- **Graph** (`src/narrative/Graph.json`): DAG of all branches, puzzles, and endings.
+### Rendering & Materials
+- **[RENDERING](docs/design-docs/RENDERING.md)** — lighting, post-processing, PBR material setup, performance budgets.
+- **[CHRONOS_SWITCH](docs/design-docs/CHRONOS_SWITCH.md)** — era-tagging system for historical context switching.
 
-### Branching Rules
-- **Never code linear paths.** All progression must read from `Graph.json`.
-- **State-driven logic**: player choices update flags in `StateManager`. 3D events respond by subscribing to `actionBus`.
-- **Narrative → 3D is one-way**: the narrative layer emits; scenes react. Scenes never query or mutate narrative state directly except through `NarrativeController`.
-- **Future tools**: consider **InkJS** for dialogue-heavy branches, **XState** for state-machine logic.
+### Narrative & Gameplay
+- **[NARRATIVE](docs/design-docs/NARRATIVE.md)** — branching logic, state management, action bus, narrative graph.
+- **[MISSION_BLUEPRINT](docs/design-docs/MISSION_BLUEPRINT.md)** — mission structure and progression.
+- **[TIMELINE_SYNC](docs/design-docs/TIMELINE_SYNC.md)** — time mechanics and synchronization.
+- **[AUDIO_ARCHITECTURE](docs/design-docs/AUDIO_ARCHITECTURE.md)** — spatial audio and dialogue systems.
+- **[witness-interactive-vite/src/narrative/README.md](witness-interactive-vite/src/narrative/README.md)** — API reference for StateManager, Actions, NarrativeController.
 
-### Adding a new puzzle or branch
-1. Define the node in `src/narrative/Graph.json` with `requiredFlags` and `unlocksFlags`.
-2. Add handler logic in `src/narrative/Actions.ts` if state transitions need side effects.
-3. Update [`docs/design-docs/NARRATIVE.md`](docs/design-docs/NARRATIVE.md) with the new branch in the Mermaid diagram.
-4. Subscribe the 3D scene to `actionBus.onStateChange()` to respond visually.
+### Development Standards & Rules
+- **[.claude/rules/babylon-patterns.md](.claude/rules/babylon-patterns.md)** — Babylon.js 9 conventions (PBR, Havok, ThinInstances, async loading).
+- **[.claude/rules/asset-pipeline.md](.claude/rules/asset-pipeline.md)** — normative rule for authoring assets (required reading before adding any 3D content).
+- **[.claude/rules/documentation-standards.md](.claude/rules/documentation-standards.md)** — how to consult cloned Babylon.js docs and handle version conflicts.
+- **[.claude/rules/documentation.md](.claude/rules/documentation.md)** — architecture updates, CHANGELOG maintenance, docstring requirements.
 
-## Technical Standards
+### Current State & Decisions
+- **[PROTOTYPE_AUDIT](docs/current-state/PROTOTYPE_AUDIT.md)** — honest review of main.ts prototype, known issues, and next steps.
+- **[CHANGELOG_DETAILED](docs/decisions/CHANGELOG_DETAILED.md)** — technical summary of all completed tasks.
+- **[SCALABILITY_PLAN](SCALABILITY_PLAN.md)** — performance targets and optimization roadmap.
 
-### Naming
-- **CamelCase** for classes/files: `TimeManager.ts`, `FamilyCompound.ts`.
-- **camelCase** for variables/functions: `initializeHavok()`, `compoundMesh`.
-- **UPPER_SNAKE_CASE** for constants: `MAX_TEXTURE_RES = 8192`.
+---
 
-### Visual Quality
-- Use `PBRMaterial` for all historical surfaces. No `StandardMaterial`.
-- Lighting: `EnvironmentTexture` (`.env`), `ShadowGenerator` with PCSS.
-- Post-processing: `DefaultRenderingPipeline` with ACES tone-mapping, SSAO2, FXAA. Bloom sparingly, for emissive sources only.
-- Set `anisotropicFilteringLevel = 16` on ground and architectural textures.
+## Quick Reference
 
-### Performance
-- Use **Thin Instances** for repeated environmental props (folly, rocks, fences).
-- Use **Havok Physics** — do not use Cannon or Ammo.
-- Use **async/await** for all `AssetContainer` loading.
-- See [`.claude/rules/babylon-patterns.md`](.claude/rules/babylon-patterns.md) for full Babylon 9 conventions.
+### Essential Commands
+```fish
+# Launch web app
+cd witness-interactive-vite && npm run dev
 
-## Critical Commands
-- `npm run dev` — launch Vite dev server.
-- `npm run build` — TypeScript check + production build.
-- `npm run preview` — preview the production build.
-- `npx babylonjs-viewer` — preview generated `.glb` assets.
+# Generate a 3D asset (standard mesh)
+cd witness-interactive-vite && python ../tools/witness.py generate <id>
 
-## Documentation Rules
-From [`.claude/rules/documentation.md`](.claude/rules/documentation.md):
+# Generate with options
+python ../tools/witness.py generate <id> --multi-view        # add 6-view synthesis
+python ../tools/witness.py generate <id> --no-refine-ref     # skip FLUX.2 stage 0.25
+python ../tools/witness.py generate <id> --kind splat --source <file.spz>
 
-1. Update `ARCHITECTURE.md` whenever a new service, schema, or API contract is introduced.
-2. Append a technical summary to `docs/decisions/CHANGELOG_DETAILED.md` after every completed task.
-3. Every new function/class has a docstring explaining its role in the larger architecture.
-4. All diagrams are Mermaid.
+# Server management
+python ../tools/witness.py start                             # boot ComfyUI + Hunyuan3D
+python ../tools/witness.py status                            # model inventory + asset state
 
-## Reference Snippet — High-Fidelity Scene Setup
-```typescript
-const setupHighFidelity = (scene: BABYLON.Scene) => {
-  scene.createDefaultEnvironment({ createGround: false, createSkybox: false });
-  const pipeline = new BABYLON.DefaultRenderingPipeline("highQuality", true, scene);
-  pipeline.samples = 4;
-  pipeline.fxaaEnabled = true;
-  pipeline.bloomEnabled = true;
-  pipeline.imageProcessing.toneMappingEnabled = true;
-  pipeline.imageProcessing.toneMappingType =
-    BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
-  new BABYLON.SSAO2RenderingPipeline("ssao", scene, 1.0, [scene.activeCamera!]);
-};
+# Build & preview
+npm run build                                               # TypeScript check + prod build
+npm run preview                                             # test production build locally
+npx babylonjs-viewer <asset.glb>                           # preview generated assets
 ```
+
+### Naming Conventions
+- **Classes/Files:** `CamelCase` (e.g. `TimeManager.ts`, `FamilyCompound.ts`)
+- **Variables/Functions:** `camelCase` (e.g. `initializeHavok()`)
+- **Constants:** `UPPER_SNAKE_CASE` (e.g. `MAX_TEXTURE_RES = 8192`)
+- **Assets:** `snake_case` with category prefix (e.g. `prop_ledger_book`, `structure_family_compound_primary`)
+
+### Key Runtime APIs
+- **AssetLibrary** — GLB asset loading & instantiation; import from `src/io/AssetLibrary.ts`
+- **SplatLibrary** — Gaussian splat loading; import from `src/io/SplatLibrary.ts`
+- **TilesetMount** — 3D Tiles streaming; import from `src/io/TilesetMount.ts`
+- **NarrativeController** — story progression API; import from `src/narrative/NarrativeController.ts`
+- **StateManager** — player state & flags; import from `src/narrative/StateManager.ts`
+- **actionBus** — narrative → 3D event bridge; subscribe in scenes
+
+---
+
+## Additional Resources
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — dependency graphs and module boundaries.
+- **[mental-cache.md](docs/mental-cache.md)** — project context snapshots and decision history.
+- **[Phase 1 Asset List](docs/design-docs/PHASE1_ASSET_LIST.md)** — prioritized asset generation plan.
+- **[Babylon.js Documentation](docs/reference/babylon.js-documentation/README.md)** — complete table of contents for the cloned v6/v7 API reference. Start here for any Babylon API questions. See [documentation-standards.md](.claude/rules/documentation-standards.md) for usage guidelines.
+
+---
+
+## Development Checklists
+
+### Adding a New 3D Asset
+See `.claude/rules/asset-pipeline.md` §6 for the full checklist. Quick summary:
+- [ ] Asset id chosen per `<category>_<name>_<variant?>`
+- [ ] Prompt template authored (for mesh/animated kinds)
+- [ ] `python tools/witness.py generate <id> --kind <kind>` completes
+- [ ] Registry entry added to `docs/asset-index.md`
+- [ ] Public copy exported to `witness-interactive-vite/public/assets/`
+- [ ] Runtime code uses appropriate library (AssetLibrary/SplatLibrary/TilesetMount), not literal URL
+- [ ] CHANGELOG entry documents the asset id
+
+### Adding a New CLI Feature to Asset Generation
+See `.claude/rules/asset-pipeline.md` §7 for CLI-GUI parity. Quick summary:
+- [ ] New flag/option/subcommand added to `python tools/witness.py`
+- [ ] **GUI controls wired in `witness-interactive-vite/src/ui/` (see ARCHITECTURE.md for current UI structure)**
+- [ ] GUI and CLI behaviors are synchronized (same defaults, same validation)
+- [ ] CHANGELOG entry documents the new CLI and GUI capability
+
+### Adding a New Narrative Branch
+See `docs/design-docs/NARRATIVE.md` for the full spec. Quick summary:
+- [ ] Node defined in `src/narrative/Graph.json` with `requiredFlags` and `unlocksFlags`
+- [ ] Handler logic added to `src/narrative/Actions.ts` if side effects needed
+- [ ] NARRATIVE.md updated with new branch in Mermaid diagram
+- [ ] 3D scene subscribes to `actionBus.onStateChange()` to respond visually
+
+---
+
+## Where Everything Is
+
+| Topic | Live Here |
+|-------|-----------|
+| Project specs | `docs/design-docs/` |
+| Current state | `docs/current-state/` |
+| Architecture & decisions | `ARCHITECTURE.md`, `docs/decisions/` |
+| Web app code | `witness-interactive-vite/src/` |
+| Asset generation pipeline | `tools/` |
+| Development standards | `.claude/rules/` |
+| Babylon.js documentation TOC | `docs/reference/babylon.js-documentation/README.md` |
+| Babylon.js API reference | `docs/reference/babylon.js-documentation/content/` |
+| Cloned docs index | `docs/mental-cache.md` |
+
+---
+
+## For Anthropic Employees & Contributors
+- **Email:** royceshannon2@gmail.com
+- **Git:** main branch is `master`; always merge to `master`
+- **CI:** all non-critical merges freeze after feature-cut dates (check CHANGELOG)

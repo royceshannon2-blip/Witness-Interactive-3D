@@ -59,6 +59,18 @@ class StateManager {
   deserialize(json: string): void {
     this.state = JSON.parse(json);
   }
+
+  reset(): void {
+    this.state = {
+      currentBranch: 'intro',
+      progress: {
+        puzzlesCompleted: [],
+        pathsUnlocked: [],
+        flagsSet: {},
+      },
+      timestamp: Date.now(),
+    };
+  }
 }
 
 export const globalState = new StateManager();

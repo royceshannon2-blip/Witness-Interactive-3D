@@ -17,6 +17,133 @@ Format per entry:
 
 Entries newest-first.
 
+## 2026-05-26 — Asset pipeline: VRAM management fix for Zero123++ stage 0.5
+**Author:** Claude
+**Scope:** `tools/asset_pipeline.py`, `tools/generate_multi_views.py`
+**Files:**
+- `tools/asset_pipeline.py` — added `flush_comfy_vram(args.comfy_server, wait=8.0)` call immediately before the Zero123++ subprocess in `maybe_multi_view()`.
+- `tools/generate_multi_views.py` — added `gc.collect()` + `torch.cuda.empty_cache()` before `pipe.to(device)` in `load_pipeline()`; set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` at the top of `main()` before any CUDA allocation.
+
+**Problem:** Zero123++ (stage 0.5) OOM-killed on every attempt with `CUDA out of memory. Tried to allocate 14.00 MiB. GPU 0 has a total capacity of 31.36 GiB of which 109.50 MiB is free`. The Hunyuan daemon stays resident (~15.45 GB) and ComfyUI retained Flux/FLUX.2 weights from stages 0 and 0.25 (~11.81 GB), leaving only ~110 MB free — far below the ~3-4 GB Zero123++ fp16 requires.
+
+**Root cause:** `flush_comfy_vram()` was only called at line 823, after `resolve_views()` returns — i.e., after stage 0.5 had already been attempted. Stages 0 and 0.25 both load large models into ComfyUI and exit without triggering a flush, so the VRAM stayed occupied through the multi-view step.
+
+**Fix:** Move the flush to the top of `maybe_multi_view()` (before the subprocess is spawned). The `wait=8.0` gives the CUDA runtime additional time to release pages compared to the pre-Hunyuan flush (5 s), since the process staying alive (ComfyUI server) means deferred release can lag. The `empty_cache()` + GC inside the Zero123++ process itself frees any fragmented reserved-but-unallocated PyTorch pages in the new subprocess. The `expandable_segments` allocator flag eliminates fragmentation-induced micro-OOM (the PyTorch allocator's error message explicitly recommends it when reserved memory is large).
+
+**No quality impact:** The flush unloads weights that are not needed until stage 0 of the next run. ComfyUI reloads them on demand; Hunyuan stays resident.
+
+**Follow-ups:** If the Hunyuan daemon is ever upgraded to a heavier checkpoint (>20 GB), Zero123++ fp16 (~4 GB) + Hunyuan (~20 GB) will approach the 32 GB ceiling again even after the ComfyUI flush. At that point consider `--dtype bf16` for Zero123++ (equivalent quality on Ampere/Ada) or temporarily offloading Hunyuan via its API before stage 0.5.
+
+---
+
+## 2026-05-25 — Texture pipeline: pull-push gap fill + hero detail projection
+**Author:** Claude (Opus 4.7)
+**Scope:** `tools/texture_asset.py`, `tools/blender/reproject_views.py`, asset-template schema
+**Files:**
+- `tools/blender/reproject_views.py` — added `_pull_push_fill()` (numpy pyramid inpaint); reworked `blend_views()` to accept per-view weights and fill view-uncovered texels by pull-push interpolation from covered AI neighbours (procedural albedo now only a last resort when nothing is covered), returning a coverage mask; extracted the per-view projection into `bake_view_projection()`; added an optional detail-view projection blended at `--detail-weight`; emit `<id>_coverage.png`; new `--detail-view`/`--detail-weight` args.
+- `tools/texture_asset.py` — added `read_template_frontmatter()` (yaml), `resolve_detail_spec()` (CLI overrides + template), and `project_detail()` (one extra FLUX.2 [klein] img2img pass → `<view>.detail.pbr.png`); `run_reproject()` and `main()` forward the detail view/weight; new `--detail-view/--detail-reference/--detail-weight/--detail-denoise` flags.
+- `prompts/asset-templates/figure_grandfather_hands.md` — added `detail_view: front` / `detail_weight` / `detail_denoise` as the first hero-detail example.
+- `docs/design-docs/ASSET_PIPELINE.md` — documented the optional `detail_*` frontmatter fields (§3.1) and added the stage 2b-detail and stage 2c gap-fill callouts.
+
+**Why:** Two quality gaps surfaced while comparing the pipeline against an external AI-asset tutorial. (1) Stage 2c filled texels that none of the six orthographic views can see (concavities, undersides) with the flat procedural albedo, leaving a visible style seam against the AI-projected material — now smoothly interpolated from covered AI neighbours via pull-push. (2) The six-view average smoothed away hero micro-detail (faces, first-person hands); a higher-weight, lower-denoise re-projection of one declared view now preserves it. The detail pass is the automated analogue of an artist painting a close-up reference onto a region in a projection tool, bounded by the local FLUX install lacking a reference/IP-adapter (so an off-frame close-up can't be auto-aligned — framing discipline is on the author; absent a reference, the always-aligned beauty render is used).
+
+**Verification:** `py_compile` on both scripts; `texture_asset.py --help` shows the new flags; standalone numpy tests confirm pull-push preserves known texels, fills holes toward neighbour colour with no NaNs, and that `detail_weight` makes the detail view dominate overlapping texels; `resolve_detail_spec()` returns `None` without config, resolves CLI overrides, and rejects non-canonical views. Not yet run end-to-end on the GPU box — validate on the next hero-asset generation (`figure_grandfather_hands`).
+
+**Follow-ups:** Optionally wire a generative inpaint (FLUX inpaint over `<id>_coverage.png`) for large uncovered regions where pull-push reads blurry. Revisit `detail_reference` auto-alignment if/when a FLUX reference/IP-adapter or depth-ControlNet is installed locally.
+
+---
+
+## 2026-05-25 — Hunyuan CUDA fix: --privileged + PyTorch cu130
+**Author:** Claude
+**Scope:** `tools/witness.py`, `tools/HUNYUAN_RUNBOOK.md`, `witness-hunyuan-sm120:latest` Docker image
+
+**Problem:** Hunyuan3D container exited ~40 s after start with `RuntimeError: CUDA unknown error` (cuInit error 999) when moving VAE to CUDA. The container's GPU was accessible (nvidia-smi worked inside) but PyTorch CUDA initialization failed.
+
+**Root causes (two independent issues):**
+1. Docker daemon on this machine uses CDI-only GPU pass-through (no `nvidia` runtime in `/etc/docker/daemon.json`). CDI injects `libcuda.so.1` and device nodes but does NOT grant access to `/dev/nvidia-caps/`, which driver 595.71.05 requires for `cuInit()` on RTX 5090. `--privileged` is the workaround; the permanent fix is `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`.
+2. `torch 2.11.0+cu128` cannot initialize CUDA against driver 595.71.05 / CUDA 13.2, even with correct library paths. Upgraded to `torch 2.12.0+cu130` + `torchvision 0.27.0+cu130` (cu130 = CUDA 13.0 runtime, fully compatible with the 13.2 driver).
+
+**Changes:**
+- `tools/witness.py` `_start_hunyuan()`: added `--privileged` to `docker run` command with explanatory comment.
+- `tools/witness.py` `_stop_hunyuan()`: `docker stop` now uses `capture_output=True`; "no such container" race condition handled gracefully instead of leaking raw docker stderr to the GUI console.
+- `witness-hunyuan-sm120:latest` image: rebuilt with `torch==2.12.0+cu130`, `torchvision==0.27.0+cu130`, and all `cuda-toolkit-13.0.2` pip dependencies.
+- `tools/HUNYUAN_RUNBOOK.md`: updated §0 pre-flight (image rebuild command now uses cu130 + `--privileged`); added two new troubleshooting rows for the CUDA 999 error and the cu128 vs cu130 mismatch.
+
+**Verification:** `python tools/witness.py status` shows `✅ http://localhost:8081` for Hunyuan3D; container logs show `Application startup complete` with no errors.
+
+**Follow-ups:** Register `nvidia-container-runtime` with Docker daemon to remove `--privileged` requirement (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`). Then remove `--privileged` from `_start_hunyuan()` and document the one-time setup step.
+
+---
+
+## 2026-05-24 — Asset pipeline: LOD generation, collision hulls, metrics in asset-index
+
+**Author:** Claude (Sonnet 4.6)
+**Scope:** `tools/` asset pipeline — stages 4 (LOD) and 5 (collision)
+**Files:**
+- `tools/generate_lods.py` — new: LOD1 + LOD2 generator via gltf-transform (weld → simplify → draco)
+- `tools/generate_collision.py` — new: collision hull GLB via trimesh convex decomposition (CoACD if available, per-component convex hull fallback); self-forks into GATE_PYTHON venv
+- `tools/register_asset.py` — rewritten: 8-column row format (adds Faces, Gates columns); reads face_count from `<id>.geometry.json` sidecar and gates verdict from `<id>.aggregate.json`; accepts `--kind`, `--source`, `--diagnostics-dir` flags
+- `tools/asset_pipeline.py` — replace steps 3/5 and 4/5 TBD placeholders with real subprocess calls; add `--generate-lods`/`--no-lods` and `--generate-collision`/`--no-collision`/`--collision-max-hulls` flags; update `append_index_row` header (6→8 columns); update `PipelineContext.row()` to emit 8 columns with n/a for non-mesh kinds; pass `--kind`/`--source`/`--diagnostics-dir` to register_asset.py subprocess; use pre-Draco `bake_input` GLB as collision source (trimesh cannot decode Draco buffers)
+- `tools/witness.py` — add `--no-lods`, `--no-collision`, `--collision-max-hulls` to `_add_generate_flags`; wire into `_build_generate_cmd`
+- `docs/asset-index.md` — rebuild with 8-column header; clean up malformed duplicate rows from old 4-column register_asset.py
+
+**What changed:**
+Pipeline stages 3/5 (LOD) and 4/5 (collision) were TBD placeholders that printed "requires generate_lods.py (TBD)". Both are now implemented end-to-end and ON by default.
+
+LOD generation: `gltf-transform weld → simplify → draco` produces LOD1 (50% faces, 15–50 m camera range) and LOD2 (15% faces, 50+ m) beside the LOD0 in `processed/glb/`. Both are copied to `public/assets/` so AssetLibrary can load them without path changes. The gltf-transform flag fix (`--quantize-position` not `--quantization-position`) was caught and corrected during testing on `prop_ledger_book`.
+
+Collision hulls: trimesh cannot decode Draco buffers, so the pipeline uses the pre-Draco `bake_input` GLB (textured or raw) as the collision source rather than the optimized LOD0. CoACD is tried first when available; per-component convex hull is the fallback. Output: `processed/collisions/<id>.collision.glb` copied to `public/assets/`.
+
+Metrics in asset-index: `register_asset.py` now reads `processed/diagnostics/<id>.geometry.json` (face_count) and `<id>.aggregate.json` (gates pass/fail verdict) and includes them as Faces and Gates columns in the registry row. Non-mesh kinds (splat, tileset, navmesh, nme) emit `n/a` via `PipelineContext.row()`.
+
+**Follow-ups:**
+- Canary re-run: `figure_grandfather_hands` end-to-end to validate the full chain including LOD + collision on a Hunyuan-generated asset.
+- Adaptive Cycles samples per category (still deferred).
+- `blender_animate.py` skeleton embedding for the `animated` asset kind (still TBD stub).
+
+---
+
+## 2026-05-22 — Asset pipeline re-audit: root-cause for "white flat squares" + triple-A plan
+
+**Author:** Claude (Opus 4.7)
+**Scope:** `docs/design-docs/ASSET_GENERATION_OVERVIEW.md`
+**Files:**
+- `docs/design-docs/ASSET_GENERATION_OVERVIEW.md` — rewritten with §0 Root Cause Analysis, §4 Approved Improvement Plan, §5 Implementation Sequence, §8 Canary Asset acceptance criteria
+
+**What changed:**
+The morning audit (same date, original doc revision) prioritised adding validation infrastructure as the P0 work item but did not name the root cause of the current "white untextured 2 flat squares" output. Re-audit traced the failure to four foundational defects, with primary evidence on `figure_grandfather_hands`:
+
+1. Raw Hunyuan output GLB has bbox `Z: ±0.018` against `X,Y: ±1.0` — a near-2D depth card, not a 3D mesh. Cause: `--multi-view` (Zero123++ stage 0.5) is opt-in and was never run for current assets, so Hunyuan saw only a single front photo and extruded a thin slab.
+2. `generate_asset.py:59` silently clamps `num_inference_steps` to `min(args.steps, 20)` even when the template's frontmatter requests 60. Comment says "API max is 20" but this is not verified against the worker.
+3. `bake_pbr.py:render_views()` produces black beauty renders for back/bottom/sides because the scene has no lights — `reset_scene()` wipes the default light and the world background is empty. `film_transparent=True` then makes uncovered pixels black.
+4. Stage 2b SDXL projection inherits the dark renders + flat geometry → `processed/textures/figure_grandfather_hands/figure_grandfather_hands_albedo.ai.png` has the bottom half textured and the top half black (UV unwrap of a flat mesh creates two patches; the back patch was unlit).
+
+User selected the maximum-quality path across all four improvement axes: multi-view always-on with CLIP pre-validation, Hunyuan step-cap investigation + octree 512 + guidance 8-10, FLUX.2 [klein] replacing SDXL in stage 2b, full bake_pbr refactor with HDRI + 3-point lighting and real depth EXR, multi-seed ensemble always-on for all assets, hard-fail + auto-retry with 3 seeds on any validation gate failure.
+
+The revised plan defines six validation gates (CLIP synth-view score, post-Hunyuan geometric, beauty coverage, depth variance, LPIPS multi-view consistency, PBR channel packing) that hard-fail and trigger auto-retry. Compute time multiplier is ~3× iteration, ~3× hero — accepted explicitly by user.
+
+**Follow-ups:**
+- Phase A: validation gate scripts (`validate_geometry.py`, `validate_pbr.py`, `validate_views.py`, `diagnostic_report.py`).
+- Phase B: multi-view default-ON, Hunyuan worker step-cap investigation.
+- Phase C: `bake_pbr.py` lighting + depth refactor.
+- Phase D: FLUX.2 [klein] stage 2b workflow + `texture_asset.py` rewrite.
+- Phase E: multi-seed ensemble (`ensemble_generate.py`).
+- Phase F: retry harness.
+- Canary asset: `figure_grandfather_hands` re-run after each phase against §8 acceptance criteria.
+
+---
+
+## 2026-05-21 — Fix Higgs Audio tokenizer schema incompatibility
+
+**Author:** @royceshannon2 (via Claude)
+**Scope:** `tools/higgs_audio_src/boson_multimodal/audio_processing/higgs_audio_tokenizer.py`
+**Files:**
+- `tools/higgs_audio_src/boson_multimodal/audio_processing/higgs_audio_tokenizer.py` — added `import inspect`; updated `load_higgs_audio_tokenizer` to filter config dict via `inspect.signature` before construction
+
+The downloaded `bosonai/higgs-audio-v2-tokenizer` config uses a new Transformers-style schema: top-level keys include `acoustic_model_config` and `semantic_model_config` as nested dicts, incompatible with the flat kwargs `HiggsAudioTokenizer.__init__` expects. The `**config` splat raised `TypeError: unexpected keyword argument 'acoustic_model_config'`, blocking M19 audio generation. An explicit parameter mapping was added to `load_higgs_audio_tokenizer`, derived by cross-referencing the checkpoint weight shapes against the constructor: `fc_prior.weight [1024, 1024]` → `quantizer_dim = D + 768 = 1024` → `D = 256` (= `acoustic_model_config.hidden_size`); `project_in.weight [64, 1024]` → `codebook_dim = 64` (top-level) and `quantizer_dim = 1024` ✓. `ratios` is taken from `acoustic_model_config.downsampling_ratios = [8,5,4,2,3]` (5 strides, hop_length=960). `n_q=9` from `acoustic_model_config.n_codebooks`. All 10 previously-mismatched weight tensors now load cleanly with zero size-mismatch warnings.
+
+**Follow-ups:** Run `tools/generate_narrator_audio.py` — tokenizer loads correctly with zero weight mismatches.
+
 ---
 
 ## 2026-05-20 — UI design system implementation ("Archival Solemnity")
@@ -776,3 +903,202 @@ Runbook download block + troubleshooting row updated to match. The `_comment` fi
 **Follow-ups:**
 - Smoke-test stage 0.25 on `vegetation_eucalyptus_mature` once the diffusion model lands. Compare the refined ref against `ref.original.png` to confirm vegetation 0.60 is the right denoise — too low ≈ no visible palette shift, too high ≈ silhouette warping.
 - Combined chain run: `--auto-ref --multi-view --era shared` should now exercise stages 0 → 0.25 → 0.5 → 1 → 2 → optimize → register sequentially. This was the previous entry's open follow-up; stage 0.25 slots in front of it.
+
+## 2026-05-21 — Automated VRAM management between pipeline stages
+
+**Author:** Claude (Sonnet 4.6)
+**Scope:** `tools/asset_pipeline.py`, `tools/texture_asset.py`, `tools/COMFY_RUNBOOK.md`
+
+**Problem:** Full pipeline runs were hitting CUDA OOM errors because multiple GPU-heavy processes coexisted in VRAM simultaneously. Root cause: Flux/FLUX.2 models (~9–22 GB) stay loaded in ComfyUI after stages 0/0.25, then Hunyuan (~20 GB) starts stage 1 — combined peak exceeds 32 GB on the RTX 5090. Secondary OOM: SDXL (~10 GB) remains in VRAM when Blender UV reproject (stage 2c) needs GPU Cycles rendering.
+
+**Fix:** Added `flush_comfy_vram(server, wait=5.0)` to both pipeline scripts. Calls `POST /free` with `{"unload_models": true, "free_memory": true}` — ComfyUI's official model eviction endpoint. The 5-second sleep lets the CUDA runtime actually release pages after PyTorch drops tensors.
+
+**Flush points:**
+- `asset_pipeline.py branch_mesh()`: after stage 0.25 (FLUX.2 done), before stage 1 (Hunyuan launch)
+- `texture_asset.py main()`: after `ai_project()` (SDXL done), before `run_reproject()` (Blender UV reproject)
+
+**COMFY_RUNBOOK.md:** Updated §0 VRAM coordination section. The old "stop Hunyuan manually before Flux" instruction is replaced with a description of the automated flush, leaving only the edge case (hero-workflow stage 0 simultaneous with Hunyuan generate spike) as a manual step.
+
+## 2026-05-21 — witness.py: full pipeline CLI + Hunyuan server management
+
+**Author:** Claude (Sonnet 4.6)
+**Scope:** `tools/witness.py`, `CLAUDE.md`, `.claude/rules/asset-pipeline.md`, `tools/HUNYUAN_RUNBOOK.md`, `tools/COMFY_RUNBOOK.md`
+
+**What changed:**
+`tools/witness.py` expanded from a thin wrapper into the complete user-facing CLI for all asset generation. Now exposes the full `asset_pipeline.py` flag surface through grouped argument sections, plus full server management for both ComfyUI (bare-metal) and Hunyuan3D (Docker).
+
+**New functionality in `witness.py`:**
+- `witness start` / `witness stop`: boots/stops both ComfyUI and Hunyuan3D together. `--no-comfy` / `--no-hunyuan` to target one. Hunyuan start issues the `docker run` with the correct volume mounts (model_cache, hy3dgen cache, model_worker.py patch), polls for readiness, warns gracefully on cold-start delays.
+- `witness generate`: all pipeline flags now exposed and grouped by stage — stage 0 (Flux), stage 0.25 (FLUX.2 refinement: `--refine-strength`, `--refine-force`, `--no-refine-ref`, `--refine-seed`), stage 0.5 (multi-view: `--mv-steps`, `--mv-guidance`, `--mv-seed`), stage 1 (Hunyuan: `--steps`, `--hunyuan-server`), stage 2 (texture: `--texture-family`, `--texture-size`, `--bake-samples`, `--skip-views`, `--fast`), advanced (`--draco-level`, `--validation-renders`). All six `--kind` values supported with their specific inputs (`--source`, `--root`, `--terrain`, `--rig`, `--image`).
+- `witness batch`: inherits all generate flags; applies them uniformly to every ID in the list.
+
+**Documentation updates:**
+- `CLAUDE.md` §Asset Pipeline: rewritten to reference `witness.py` as the single entry point; added fish shell quick-reference block.
+- `.claude/rules/asset-pipeline.md` §1: updated canonical command to `witness.py generate`; clarified that `asset_pipeline.py` is the internal orchestrator.
+- `HUNYUAN_RUNBOOK.md` §4 and §8: replaced all `asset_pipeline.py` invocations with `witness.py` equivalents; manual docker commands retained as fallback.
+- `COMFY_RUNBOOK.md` §4 and §8: replaced with `witness.py` usage; manual ComfyUI start/stop retained as fallback.
+
+## 2026-05-22 — Asset-generation gates A1–A4 + B1–B2 (depth-card / unlit-views / half-projection defence)
+
+**Author:** Claude (Opus 4.7)
+**Scope:** `tools/validate_geometry.py` (new), `tools/validate_views.py` (new), `tools/validate_pbr.py` (new), `tools/diagnostic_report.py` (new), `tools/asset_pipeline.py`, `tools/generate_asset.py`
+
+**Problem:** `figure_grandfather_hands` canary regressed to "two flat white squares". Forensic on the run sidecars showed three independent root-cause bugs that the orchestrator silently shipped past:
+1. Hunyuan produced a depth-card mesh (bbox depth ratio 0.017, X=Y=2.0, Z=0.034) from single-image conditioning.
+2. `bake_pbr.render_views()` emitted six pure-black PNGs (luminance 0.0003) because `reset_scene()` wiped factory lights and `film_transparent=True` left the background un-shaded.
+3. SDXL stage 2b projected the dark conditioning onto ~43% of UV islands; the rest stayed at fill-colour #000000 (56.5% of pixels).
+A fourth issue — `generate_asset.py` printing "API max 20" and using `min(args.steps, 20)` — was a banner lie (no API cap exists; the underlying pipeline default is 50).
+
+**Phase A — gates (catch the failures, don't ship them):**
+- `validate_geometry.py` (Gate 2): post-Hunyuan bbox depth ratio ≥ 0.10 (depth-card guard), face count within [0.5×, 2.0×] template target, centroid offset ≤ 0.3× max extent, vertex count in [1k, 2M]. Optional `--strict-manifold` for closed props. Writes `<id>.geometry.json` sidecar.
+- `validate_views.py` (Gate 3): per-view luminance ∈ [0.05, 0.95], std ≥ 0.04, coverage ≥ 0.10; cross-view luminance stdev < 0.15; optional CLIP gate against the template's `clip_prompt`. Supports both direction-named `<dir>.beauty.png` (post-bake) and indexed `view_<n>.png` (Zero123++ pre-Hunyuan) layouts via `--indexed`. Writes `<id>.views.json` (or `<id>.synth_views.json` when indexed).
+- `validate_pbr.py` (Gate 5): texture set completeness + resolution match; albedo fill < 5% suspect colours, luminance ∈ [0.05, 0.85]; normal R/G mean near 0.5 with B > 0.55 (Y+ OpenGL); MR R-channel unused, G/B variance present.
+- `diagnostic_report.py` (Gate 4): aggregates the three sidecars into one markdown + one JSON. JSON exposes `recommended_action ∈ {pass, retry_with_new_seed, halt_and_fix_pipeline}` so the Phase F retry harness can branch deterministically. Markdown adds D1–D6 remediation hints mapped to the failure strings.
+
+**Phase B — defaults flip + first defence wired:**
+- B1: Hunyuan step cap removed (was `min(args.steps, 20)` — a doc artefact, no upstream cap exists). Defaults bumped: `--steps` 20 → 50, `--octree-resolution` 256 → 512, `--guidance-scale` 5.0 → 8.0. Fixed banner that still printed "(API max 20)".
+- B2: `--multi-view` flipped to default ON; new `--no-multi-view` opt-out. Wired pre-Hunyuan Gate 1 — synth views from Zero123++ now run through `validate_views.py --indexed` before `flush_comfy_vram()` so a bad stage 0.5 halts the pipeline ~5 minutes before it would have wasted GPU time on Hunyuan. Gate 1 writes `<id>.synth_views.json` (distinct sidecar key) so the diagnostic report shows synth-view + post-bake checks as separate rows.
+
+**Wiring in `asset_pipeline.py branch_mesh()`:**
+- After Hunyuan emits raw GLB → run Gate 2 → halt on fail.
+- After `texture_asset.py` finishes stage 2 bake → run Gate 3 against `processed/views/<id>/` → halt on fail.
+- Same point → run Gate 5 against `processed/textures/<id>/` → halt on fail.
+- Always run `diagnostic_report.py` at end-of-branch (success or fail) so operators get one canonical artefact at `processed/diagnostics/<id>.report.md`.
+
+**New orchestrator flags:**
+- `--skip-gates` — operator escape hatch for known-broken assets (does not skip the aggregator).
+- `--strict-manifold` — promote Gate 2's non-watertight warning to a fail.
+- `--gate-resolution-floor N` — override Gate 5's per-asset texture floor.
+- `--octree-resolution`, `--guidance-scale` — passthroughs for the new Hunyuan defaults.
+
+**Canary baseline (figure_grandfather_hands, pre-fix run):**
+Gates correctly identified all three root causes — see `processed/diagnostics/figure_grandfather_hands.report.md`. Gate 2 failed (2 failures + 1 warning), Gate 3 failed (18 failures — every view), Gate 5 failed (2 failures + 1 warning). Recommended action: `halt_and_fix_pipeline` (escalates past simple seed re-roll because the contract-violation tokens fire). This is the baseline the canary re-run will be measured against once Phases C–F land.
+
+**Smoke test of Phase B2 indexed gate:**
+Ran `validate_views.py --indexed --no-clip` against `prompts/asset-templates/prop_ledger_book/views/` (6 real Zero123++ outputs from 2026-05-13). All six views passed: luminance 0.31–0.41, coverage 0.34–0.96, cross-view stdev 0.033 (well under the 0.15 ceiling). `diagnostic_report.py` rendered the new "Gate 1 — Pre-Hunyuan Synth Views" row at the top of the table and produced `overall_valid: true, recommended_action: pass` in the JSON aggregate.
+
+**Pending:** Phase C (bake_pbr.py lighting + depth EXR refactor), Phase D (FLUX.2 [klein] stage 2b projector), Phase E (multi-seed ensemble default), Phase F (auto-retry harness), and the canary re-run against full acceptance criteria.
+
+---
+
+## 2026-05-22 — Asset-generation gates C–F (lighting, FLUX.2 projector, ensemble, retry)
+
+Closed Phases C/D/E/F from the asset-quality plan; only the live canary re-run remains.
+
+**Phase C — `bake_pbr.py` lighting + depth EXR refactor.** Replaced the body of `render_views()` and added four helpers:
+* `setup_world_environment(hdri_path)` — bright Hosek-Wilkie sky (or HDRI when `--hdri` is passed) at strength 2.5. Was the missing ingredient behind the "two flat white squares" canary failure: `reset_scene()` wiped the default light and `film_transparent=True` left un-shaded pixels black, so every beauty render averaged luminance ≈ 0.0003.
+* `add_camera_key_light(name, camera_obj, centre, diag)` — soft area key in the camera's upper-left quadrant; energy scales with bbox diagonal so a ledger book and a 8 m eucalyptus get comparable visible illumination.
+* `_setup_depth_compositor(views_dir)` — wires the Blender 5.1 `compositing_node_group` API (not `scene.node_tree` — that's gone) with a `CompositorNodeOutputFile` whose item uses `override_node_format=True` + `OPEN_EXR` + `color_depth='32'`. Beauty continues to flow through `scene.render.filepath` because `CompositorNodeComposite` is undefined in 5.1.
+* `_bbox_centre_and_diag(meshes)` — extracted from `fit_camera_to_meshes` so the light placer can reuse it.
+
+Threaded `--hdri` through `bake_pbr.py main()` → `render_views()` and reused the per-view file-naming pattern (`<view>_beauty_.png` / `<view>_depth_.exr`) so `texture_asset.normalise_view_filenames()`' existing glob `<view>_<kind>_*.<ext>` continues to match (`*` matches the empty trailing string Blender 5.1 emits).
+
+**Smoke test (cube fixture, headless Blender 5.1.2):** all 6 beauty PNGs render with mean luminance 0.78–0.79; all 6 depth EXRs land; normalise glob catches both. The pure-black canary failure pattern is gone.
+
+**Phase D — FLUX.2 [klein] stage 2b projector.** Replaced the SDXL+ControlNet workflow `sdxl_depth_pbr.json` with `flux2_klein_pbr.json`: 15 nodes implementing FLUX.2 klein img2img (UNETLoader → DualCLIPLoader → VAELoader → LoadImage → VAEEncode → CLIPTextEncode → FluxGuidance@3.5 → ModelSamplingFlux → BasicGuider → RandomNoise → KSamplerSelect(euler) → BasicScheduler(simple, 28 steps, denoise=__DENOISE__) → SamplerCustomAdvanced → VAEDecode → SaveImage). Local install lacks a FLUX-compatible depth ControlNet, so depth conditioning is now delegated to Phase C's pre-shaded beauty render: the VAE-encoded beauty seeds img2img, FLUX re-styles for PBR per the prompt. Depth EXRs continue to be emitted for the eventual depth-ControlNet swap.
+
+Refactored `texture_asset.load_pbr_workflow(prompt, view_filename, seed, denoise)` (dropped the now-unused `depth_filename` parameter) and `texture_asset.ai_project(asset_id, views_dir, comfy_server, seed=481109, denoise=0.62)` (per-view seed = base + view_index so all six panels don't share noise structure). Surfaced `--ai-project-seed` / `--ai-project-denoise` on both `texture_asset.py` and `asset_pipeline.py`; orchestrator forwards them. Updated `tools/COMFY_RUNBOOK.md §5b` (model layout, what stage 2b does, VRAM budget — 14 GB FLUX.2 + 8 GB Hunyuan idle = 22 GB on the 32 GB 5090).
+
+**Smoke test:** `load_pbr_workflow()` builds the workflow dict with all 15 nodes; every substitution (`__PROMPT__`, `__VIEW_FILENAME__`, `__SEED__`, `__DENOISE__`) lands and the JSON round-trips cleanly. Live ComfyUI submission deferred to the canary run.
+
+**Phase E — Multi-seed Hunyuan ensemble (always-on, N=3 default).** Added `run_stage1_ensemble(gen_cmd_template, asset_id, raw_dir, base_seed, ensemble_size, strict_manifold, skip_gates)` and a composite `_score_candidate(metrics)` to `asset_pipeline.py`:
+
+* Score = `3·bbox_depth_ratio + face_budget_proximity + 0.4·(1 − max_centroid_offset) + 0.10·manifold`.
+* Per-attempt: writes to `raw/.ensemble/<asset_id>/seed_<n>.glb`, runs `validate_geometry.validate_geometry()` in-process for scoring, picks the highest-scoring valid candidate, copies it to `raw/<asset_id>.glb` so downstream stages are oblivious.
+* All-fail fallback: surfaces the highest-bbox candidate so the diagnostic report has something to inspect; the Phase F harness then decides whether to retry or halt.
+* Recorded the per-candidate (seed, score, metrics, failures, glb) list into the Gate 2 sidecar under `ensemble.candidates`, so the aggregate report sees every attempt.
+
+New CLI: `--ensemble-size N` (default 3), `--ensemble-base-seed N` (default 481109). `PipelineContext` grew `ensemble_records: list[dict]` and `ensemble_winning_seed: int | None` (required `field(default_factory=list)`; added `field` to the dataclasses import).
+
+**Smoke test (scoring):** synthetic metrics confirm the scorer prefers healthy (2.62) over depth-card (0.57) by 4.6×, manifold beats non-manifold by exactly +0.10, and on-target face count beats off-target by exactly +1.0 (the face-budget weight). Live ensemble execution deferred to the canary run.
+
+**Phase F — Auto-retry harness (3 attempts default).** Added `_read_aggregate_action(asset_id)` and rewrote `cmd_generate(args)` in `tools/witness.py` to wrap the subprocess call in a retry loop:
+* attempt 1 uses the user-supplied seeds; each retry bumps `--ensemble-base-seed` and `--ai-project-seed` by `RETRY_SEED_STRIDE = 10_000` so retries genuinely explore a different region of seed space.
+* Loop exits on `(rc==0, action ∈ {pass, None})` → success; `action=='halt_and_fix_pipeline'` → immediate failure (contract violations don't unstick by re-rolling); `max_retries` exhausted → failure with last rc.
+* Surfaced as `--max-retries N` (default 3).
+
+Also corrected the long-stale `witness.py --steps` default from 20 → 50 (matched the orchestrator) and dropped the SDXL active-stages banner (now `FLUX.2 [klein] (stage 0.25 + 2b)`).
+
+**Smoke test (harness):** `_read_aggregate_action()` correctly parses all three verdicts (`pass`, `retry_with_new_seed`, `halt_and_fix_pipeline`), returns `(None, {})` on missing or corrupt aggregates. Live retry behaviour deferred to the canary run.
+
+**Forwarded flags (witness.py → asset_pipeline.py → texture_asset.py):** `--ensemble-size`, `--ensemble-base-seed`, `--ai-project-seed`, `--ai-project-denoise`. The `--help` of `witness.py generate` lists every new flag under the "Stage 1 quality control" group.
+
+**Live canary deferred:** ComfyUI starts cleanly; the Hunyuan Docker container failed to come up inside the boot window during this session. The harness is ready for a fire-and-forget run when both servers are healthy. Documented command:
+
+```fish
+# 1. Boot the servers (Hunyuan can take up to ~12 min cold)
+python tools/witness.py start
+
+# 2. Wipe existing diagnostics so the new run is unambiguous
+rm -rf processed/diagnostics/figure_grandfather_hands.*
+
+# 3. Fire the canary with full Triple-A defaults (Phase E ensemble × 3, Phase F retries × 3)
+python tools/witness.py generate figure_grandfather_hands --multi-view
+
+# 4. Inspect the aggregate
+cat processed/diagnostics/figure_grandfather_hands.report.md
+jq '.recommended_action, .overall_valid' processed/diagnostics/figure_grandfather_hands.aggregate.json
+```
+
+Acceptance criteria (from `docs/design-docs/ASSET_GENERATION_OVERVIEW.md §8`): all 5 gates pass, `bbox_depth_ratio > 0.10`, beauty renders lit (mean luminance > 0.05 per view), albedo `< 5%` suspect-fill pixels. Until that run lands, Task #11 stays in `in_progress`.
+
+---
+
+## Pipeline checkpoint resume + GUI Post-process button (2026-05-25)
+
+**Motivation:** after a successful Hunyuan mesh generation, the downstream stages (Draco optimisation, LOD generation, collision hull, register, export) can fail independently — Blender crash, tool missing, VRAM eviction, etc. Previously the only recovery was to re-run the full `witness.py generate` command, which re-ran the expensive Hunyuan step unnecessarily. The GUI also had no way to resume a partially-complete pipeline run.
+
+**`tools/asset_pipeline.py`**
+
+Extracted stages 0–1.5 (ref-gen, stage 0.25 refine, stage 0.5 multi-view, stage 1 Hunyuan ensemble, stage 1.5 PBR bake + Gates 2/3/5) from `branch_mesh` into a new helper `_run_generate_and_texture(args, ctx, glb_dir, raw_dir) -> Path`. `branch_mesh` now routes to either this helper or a new checkpoint-resume path depending on `--skip-generate`:
+
+- **Normal path:** `branch_mesh` → `_run_generate_and_texture` → optimize → LODs → collision → register → export (unchanged behaviour).
+- **Checkpoint-resume path (`--skip-generate`):** search for an existing GLB in priority order `<id>.textured.glb` → `raw/<id>.glb` → `raw/.ensemble/<id>/<id>.glb`; skip generation + texturing entirely and jump directly to optimize → LODs → collision → register → export.
+
+Added `--skip-generate` argument to `parse_args` (checkpoint resume group, default `False`).
+
+**`tools/witness.py`**
+
+Added `--skip-generate` to the `generate` subparser (Checkpoint resume group) and threaded it through `_build_generate_cmd` to `asset_pipeline.py`.
+
+**`tools/witness_gui.py`**
+
+- New helpers: `_has_textured_glb(id)`, `_has_raw_glb(id)`, `_can_post_process(id)` — `_can_post_process` is true when a textured or raw GLB exists but no final optimised GLB does.
+- Asset-list icons updated: 🔵 "mesh ready — click Post-process to optimize + export" state added between 🟡 (ref only) and 🟢 (final GLB).
+- **"⚙ Post-process" button** added to the footer (styled green, beside Generate). Calls `witness.py generate <id> --skip-generate [--no-lods] [--no-collision]` with the current LOD/collision checkbox state. Enabled only when `_can_post_process` is true and no pipeline is already running.
+- `_on_selection_change` and `_on_done_ok/err` updated to enable/disable and reset the new button.
+
+**Smoke test:** `python tools/asset_pipeline.py figure_grandfather_hands --kind mesh --skip-generate --no-lods --no-collision` found the existing `processed/glb/figure_grandfather_hands.textured.glb`, ran `optimize_asset.py`, `register_asset.py`, and `export_babylon.py`, producing `witness-interactive-vite/public/assets/figure_grandfather_hands.glb`. Exit 0.
+
+---
+
+## Multi-view hardening: subject framing, real-photo input, cross-view colour gate (2026-05-26)
+
+**Motivation:** post-mortem on the `figure_grandfather_hands` "triangular prism" slab. Root cause was a background-laden, low-contrast top-down reference fed to Zero123++, whose hallucinated views Hunyuan fused into a flat slab. Geometry Gate 2 (bbox depth ratio ≥ 0.10) passed the slab at 0.447, so the failure was invisible to the existing gates. This entry hardens the multi-view stage along the axes that actually discriminate the failure, and adds a download-free path to true all-angle accuracy (real captures). FLUX ControlNet was evaluated and **declined**: only an SDXL depth ControlNet is installed (wrong architecture for FLUX.1 [dev] ref-gen), a FLUX ControlNet + preprocessor is a multi-GB add, and it only fixes the 2D ref pose for the ~2 posed-figure assets — the hands are better served by photographs via the new real-view path.
+
+**`tools/generate_multi_views.py`**
+- `remove_background(img, enabled)` strips the ref background via rembg onto a white matte; loud (now path-neutral) fallback when rembg is absent. Single biggest slab determinant.
+- New `frame_subject(rgba, fill=0.85, out_px=512)`: crops to the alpha bbox, centres on a square white canvas at 85% long-side fill. Zero123++ pose conditioning is frame-centre-relative, so an off-centre / edge-touching / tiny subject yields misaligned novel views. Wired into `remove_background` (reuses the rembg alpha).
+- New `stage_real_views(...)` + `--real-views DIR` mode: stages author photographs as `view_N.png` with the SAME bg-removal + framing as synthesis, skipping Zero123++ entirely. Observed views beat hallucinated ones for all-angle accuracy.
+
+**`tools/validate_views.py`**
+- CLIP gate rewritten onto `transformers.CLIPModel` (`openai/clip-vit-base-patch32`) — the prior `open_clip` backend was never installed, so the gate was dead code (`clip_score: null` on the slab). Now softmax-scores each view on the real prompt vs four failure-mode negatives (blank grey primitive, featureless block, blob, corrupted render); fails below `CLIP_REAL_PROB_FLOOR = 0.40`. This is the check that actually catches the slab, and it runs at Gate 1 (pre-Hunyuan), ~5–10 min before the ensemble.
+- New cross-view foreground-colour consistency check (WARNING): each view's mean foreground RGB must stay within `FG_COLOR_DIVERGENCE_WARN = 0.22` (L1) of the leave-one-out median of the others; flags a view that fused a different subject/background. Gated to `MIN_VIEWS_FOR_COLOUR = 5` (below that one outlier drags the median and false-warns inliers → skipped with a note). Empirically coverage does NOT discriminate the slab (good full-frame hands 0.84–0.97 vs bad synth 0.84–0.95), so there is deliberately no coverage hard-fail.
+- Indexed mode is count-flexible (globs `view_*.png` by numeric index) so real-view sets of any count validate.
+
+**`tools/asset_pipeline.py`**
+- `_detect_real_views` (explicit `--real-views DIR` or auto `prompts/asset-templates/<id>/real_views/`) + `resolve_views`: real views win over synthesis. `resolve_views` invokes `generate_multi_views.py --real-views` under the ML venv (`--multi-view-python`) so rembg is importable — the orchestrator runs under the system python, which has none — then runs `Gate 1 (real views)`. Removed the in-process `_stage_view` (raw re-encode), which would have carried photo backgrounds into Hunyuan and reproduced the slab.
+- `branch_mesh`: real-view detection precedes the `--image` check (first real view = default ref); stage 0.25 ref-refine is skipped when real views are supplied. Gate 1 (synth) no longer passes `--no-clip`.
+
+**`tools/witness.py`**: `--real-views` passthrough to `asset_pipeline.py`.
+
+**Verification:** `py_compile` clean on all four. Cross-view colour: a 6-view set (5 jittered hand variants + 1 eucalyptus outlier) warns on only the outlier (L1 0.31); an N=3 set is skipped with a note. `frame_subject` unit test: an off-centre 80×120 subject re-centres on a 512² square at ~0.88 fill; empty-alpha guarded. Real-view staging: 4 mixed png/jpg sources → `view_0..3.png` under `--real-views --force`, no Zero123++ load, loud rembg-missing fallback. GPU stages (Zero123++, Hunyuan) not executed this session.
+
+**Prerequisite for real-view bg-removal to fire:** `pip install rembg onnxruntime` into the ComfyUI venv (`/home/royce3/ComfyUI/venv`). Until then bg-removal no-ops with the loud warning and the slab risk remains.
+
+**`tools/witness_gui.py` — CLI↔GUI parity (§7) + hands preset.** The PySide6 GUI now exposes the flags the real-ref hands flow needs:
+- **"Skip refine — use ref / real photo as-is" checkbox** → `--no-refine-ref`. Wired in `_apply_preset` (preset-driven default) and `_on_generate` (cmd append). Tooltip notes the Refine-strength slider is moot when checked.
+- **"Real views dir" picker** (read-only line edit + Browse… + clear) → `--real-views DIR`. `_on_browse_real_views` opens at the asset's template dir. `_on_selection_change` auto-fills the field when `prompts/asset-templates/<id>/real_views/` holds captures (empty field still falls back to pipeline auto-detection).
+- **New "Hands" preset** (hero-tier: steps 80 / octree 768 / ensemble 3 / texture 8192 / bake 256 / validation-renders, `multi_view=True`, `no_refine=True`) and an `ASSET_PRESET` per-asset override mapping `figure_grandfather_hands` → "Hands" (wins over the category map). `no_refine` added to all six existing presets as `False` so generated-ref assets still refine. The PresetBar auto-renders the new button (it iterates `PRESETS`).
+
+**Verification:** `py_compile` clean. Headless (`QT_QPA_PLATFORM=offscreen`) smoke test with a stubbed worker: selecting `figure_grandfather_hands` auto-applies "Hands" (no_refine + multi_view + val_renders ON); the emitted cmd is `generate figure_grandfather_hands --steps 80 --octree-resolution 768 --guidance-scale 9.0 --ensemble-size 3 --refine-strength 0.5 --texture-size 8192 --ai-project-denoise 0.65 --bake-samples 256 --multi-view --validation-renders --no-refine-ref`; setting the picker appends `--real-views <dir>`; the control asset `figure_investigator_hands` falls back to "Figure" with no `--no-refine-ref` leak. Also reconciled the hands template's LOD0 prose (`~10000` → `~40000 tris`) to match the enforced `target_poly_lod0`.

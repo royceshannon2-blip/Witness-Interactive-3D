@@ -1,0 +1,14 @@
+{
+  "asset_id": "vegetation_eucalyptus_mature",
+  "source_glb": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/vegetation_eucalyptus_mature.textured.glb",
+  "hdri": null,
+  "samples": 32,
+  "resolution": 512,
+  "renders": [
+    "turntable_0.png",
+    "turntable_90.png",
+    "turntable_180.png",
+    "turntable_270.png",
+    "hero.png"
+  ]
+}

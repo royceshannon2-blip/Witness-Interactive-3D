@@ -33,8 +33,9 @@ export const PAST_FLAG_PREFIX = "past_";
 
 /** Event emitted by TimeManager's subscribers. */
 export type TimeEvent =
-  | { type: "transitionStarted"; from: Era; to: Era }
-  | { type: "transitionCompleted"; from: Era; to: Era }
+  | { type: "transitionStarted"; from: Era; to: Era; durationSec: number }
+  | { type: "transitionMidpoint"; from: Era; to: Era; durationSec: number }
+  | { type: "transitionCompleted"; from: Era; to: Era; durationSec: number }
   | { type: "pastChangeRecorded"; key: string; value: boolean };
 
 export type TimeListener = (event: TimeEvent) => void;
@@ -81,27 +82,41 @@ export class TimeManager {
    * Switch to the given era. Resolves after the (optional) crossfade completes.
    * Rejects silently if already in the target era or already transitioning.
    *
-   * @param target   Era to switch into.
-   * @param duration Crossfade duration in seconds. Defaults to `0` (instant).
-   *                 Non-zero values are reserved for a future post-fx blend;
-   *                 for now the duration is awaited but the swap is instant.
+   * Event order (per CHRONOS_SWITCH.md §3.6):
+   *   1. `transitionStarted` (synchronous)
+   *   2. wait `duration / 2` seconds
+   *   3. flip camera mask, emit `transitionMidpoint`
+   *   4. wait another `duration / 2` seconds
+   *   5. `transitionCompleted`
+   *
+   * Subscribers (RenderingPipeline, AudioManager, lighting orchestrator)
+   * tween their own state between Started and Completed using `durationSec`.
+   *
+   * @param target      Era to switch into.
+   * @param durationSec Total crossfade duration in seconds. `0` = instant flip.
    */
-  async transition(target: Era, duration = 0): Promise<void> {
+  async transition(target: Era, durationSec = 0): Promise<void> {
     if (this.transitioning) return;
     if (target === this.era) return;
 
     const from = this.era;
     this.transitioning = true;
-    this.emit({ type: "transitionStarted", from, to: target });
+    this.emit({ type: "transitionStarted", from, to: target, durationSec });
 
-    if (duration > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, duration * 1000));
+    if (durationSec > 0) {
+      await sleep((durationSec * 1000) / 2);
     }
 
     this.era = target;
     this.applyMask(target);
+    this.emit({ type: "transitionMidpoint", from, to: target, durationSec });
+
+    if (durationSec > 0) {
+      await sleep((durationSec * 1000) / 2);
+    }
+
     this.transitioning = false;
-    this.emit({ type: "transitionCompleted", from, to: target });
+    this.emit({ type: "transitionCompleted", from, to: target, durationSec });
   }
 
   /**
@@ -167,6 +182,10 @@ export class TimeManager {
     if (!this.camera) return;
     this.camera.layerMask = era === "past" ? CAMERA_MASK_PAST : CAMERA_MASK_PRESENT;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** App-wide singleton. Scenes, world modules, and UI all share this instance. */

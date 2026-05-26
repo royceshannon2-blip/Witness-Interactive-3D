@@ -1,0 +1,113 @@
+{
+  "_comment": "Witness asset pipeline — FLUX.2 [klein] stage 2b PBR projection. Replaces sdxl_depth_pbr.json. tools/texture_asset.py substitutes __PROMPT__, __VIEW_FILENAME__, __DENOISE__, __SEED__. The beauty render (from Phase C's HDRI + per-camera key lighting in bake_pbr.py) is VAE-encoded as the starting latent so spatial geometry is preserved through shading; FLUX.2 then re-styles to PBR material per the prompt. Depth EXRs continue to be emitted by bake_pbr.py for the eventual FLUX depth-ControlNet swap, but are not used here because the installed controlnet is SDXL-only. Required ComfyUI assets: diffusion_models/flux-2-klein-base-9b-fp8.safetensors, clip/clip_l.safetensors, clip/t5xxl_fp8_e4m3fn.safetensors, vae/flux2-vae.safetensors.",
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b-fp8.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "t5xxl_fp8_e4m3fn.safetensors",
+      "clip_name2": "clip_l.safetensors",
+      "type": "flux"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "__VIEW_FILENAME__"
+    }
+  },
+  "5": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["4", 0],
+      "vae": ["3", 0]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "__PROMPT__",
+      "clip": ["2", 0]
+    }
+  },
+  "7": {
+    "class_type": "FluxGuidance",
+    "inputs": {
+      "conditioning": ["6", 0],
+      "guidance": 3.5
+    }
+  },
+  "8": {
+    "class_type": "ModelSamplingFlux",
+    "inputs": {
+      "model": ["1", 0],
+      "max_shift": 1.15,
+      "base_shift": 0.5,
+      "width": 1024,
+      "height": 1024
+    }
+  },
+  "9": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": ["8", 0],
+      "conditioning": ["7", 0]
+    }
+  },
+  "10": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": __SEED__
+    }
+  },
+  "11": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "12": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": ["8", 0],
+      "scheduler": "simple",
+      "steps": 28,
+      "denoise": __DENOISE__
+    }
+  },
+  "13": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": ["10", 0],
+      "guider": ["9", 0],
+      "sampler": ["11", 0],
+      "sigmas": ["12", 0],
+      "latent_image": ["5", 0]
+    }
+  },
+  "14": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["13", 0],
+      "vae": ["3", 0]
+    }
+  },
+  "15": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "witness_pbr_flux2",
+      "images": ["14", 0]
+    }
+  }
+}

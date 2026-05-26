@@ -1,0 +1,16 @@
+{
+  "skeleton": "poc_rig",
+  "fps": 30,
+  "clips": {
+    "idle":          { "start": 0,   "end": 60,  "loop": true,  "type": "locomotion" },
+    "walk_forward":  { "start": 60,  "end": 100, "loop": true,  "type": "locomotion" },
+    "walk_backward": { "start": 100, "end": 140, "loop": true,  "type": "locomotion" },
+    "strafe_left":   { "start": 140, "end": 180, "loop": true,  "type": "locomotion" },
+    "strafe_right":  { "start": 180, "end": 220, "loop": true,  "type": "locomotion" },
+    "run_forward":   { "start": 220, "end": 260, "loop": true,  "type": "locomotion" },
+    "jump_start":    { "start": 260, "end": 280, "loop": false, "type": "action" },
+    "jump_loop":     { "start": 280, "end": 300, "loop": true,  "type": "action" },
+    "jump_land":     { "start": 300, "end": 320, "loop": false, "type": "action" },
+    "use_reach":     { "start": 320, "end": 340, "loop": false, "type": "action" }
+  }
+}

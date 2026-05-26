@@ -1,0 +1,116 @@
+{
+  "asset_id": "structure_rugo_main_house",
+  "views_dir": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views",
+  "valid": true,
+  "failures": [],
+  "warnings": [],
+  "per_view": [
+    {
+      "name": "view_0",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views/view_0.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5870350003242493,
+      "luminance_std": 0.10390153527259827,
+      "coverage": 0.9934761345852895,
+      "background_rgba": [
+        0.6021768450737,
+        0.5688725709915161,
+        0.5516326427459717,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_1",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views/view_1.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.6026869416236877,
+      "luminance_std": 0.09962759912014008,
+      "coverage": 0.996244131455399,
+      "background_rgba": [
+        0.5913082957267761,
+        0.559766948223114,
+        0.5374510288238525,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_2",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views/view_2.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5739602446556091,
+      "luminance_std": 0.14376050233840942,
+      "coverage": 0.3640747261345853,
+      "background_rgba": [
+        0.619554877281189,
+        0.5906733870506287,
+        0.5694844722747803,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_3",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views/view_3.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5633749961853027,
+      "luminance_std": 0.1310737580060959,
+      "coverage": 0.995099765258216,
+      "background_rgba": [
+        0.6036987900733948,
+        0.559162974357605,
+        0.5365904569625854,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_4",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views/view_4.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.6009874939918518,
+      "luminance_std": 0.09527446329593658,
+      "coverage": 0.9965962441314554,
+      "background_rgba": [
+        0.5972833633422852,
+        0.547974169254303,
+        0.5185866951942444,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_5",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/structure_rugo_main_house/views/view_5.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.562193751335144,
+      "luminance_std": 0.15316984057426453,
+      "coverage": 0.9706181533646322,
+      "background_rgba": [
+        0.6136952042579651,
+        0.5797200798988342,
+        0.5586265325546265,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    }
+  ],
+  "aggregate": {
+    "luminance_mean_across_views": 0.5817064046859741,
+    "luminance_std_across_views": 0.016417086831085538,
+    "luminance_std_threshold": 0.15
+  }
+}

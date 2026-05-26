@@ -1,0 +1,60 @@
+{
+  "asset_id": "structure_rugo_main_house",
+  "glb_path": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/structure_rugo_main_house.glb",
+  "valid": true,
+  "failures": [],
+  "warnings": [],
+  "metrics": {
+    "bbox_extents": [
+      0.7507970929145813,
+      1.5282410979270935,
+      1.9949733018875122
+    ],
+    "bbox_depth_ratio": 0.376344431378719,
+    "bbox_depth_threshold": 0.1,
+    "vertex_count": 414346,
+    "face_count": 828688,
+    "face_target": 12000,
+    "raw_poly_cap": 2000000,
+    "face_budget_low": 6000,
+    "centroid": [
+      -0.002392748194493211,
+      -0.002463307899641933,
+      -0.0027099490150145596
+    ],
+    "centroid_offset_ratios": [
+      0.001199388579400712,
+      0.0012347573259809108,
+      0.0013583886122438755
+    ],
+    "centroid_offset_threshold": 0.3,
+    "manifold": true
+  },
+  "ensemble": {
+    "size": 2,
+    "base_seed": 501109,
+    "winning_seed": 501109,
+    "candidates": [
+      {
+        "seed": 501109,
+        "glb": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/.ensemble/structure_rugo_main_house/seed_501109.glb",
+        "valid": false,
+        "score": -Infinity,
+        "metrics": {},
+        "failures": [
+          "trimesh failed to load GLB: No module named 'trimesh'"
+        ]
+      },
+      {
+        "seed": 501110,
+        "glb": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/.ensemble/structure_rugo_main_house/seed_501110.glb",
+        "valid": false,
+        "score": -Infinity,
+        "metrics": {},
+        "failures": [
+          "trimesh failed to load GLB: No module named 'trimesh'"
+        ]
+      }
+    ]
+  }
+}

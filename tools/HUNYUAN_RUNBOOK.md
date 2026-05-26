@@ -20,13 +20,26 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 # Expect: NVIDIA GeForce RTX 5090, 32607 MiB, 595.71.05 (or newer)
 
 # Docker + NVIDIA container toolkit
-docker info | grep -i runtime              # should list "nvidia"
-nvidia-container-toolkit -version          # ≥ 1.17
+nvidia-ctk --version                       # ≥ 1.17
+# NOTE: `docker info | grep -i runtime` will NOT show "nvidia" unless you have run:
+#   sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+# This is optional — witness.py uses --privileged instead (see Known Issues below).
 
-# Image present locally
-docker image inspect kechiro/hunyuan3d-2.1-cachedstart:latest --format='{{.Id}}'
-# If "No such image", pull it:
-#   docker pull kechiro/hunyuan3d-2.1-cachedstart:latest   # ~12 GB
+# Image present locally — use the cu130-patched local image (RTX 5090 / Blackwell)
+docker image inspect witness-hunyuan-sm120:latest --format='{{.Id}}'
+# If "No such image", rebuild it from the base (cu130 is required for driver 595.71.05):
+#   docker pull kechiro/hunyuan3d-2.1-cachedstart:latest           # ~22 GB
+#   docker run -d --gpus all --privileged --name witness-hunyuan-build kechiro/hunyuan3d-2.1-cachedstart:latest sleep 3600
+#   # 1. Upgrade PyTorch to cu130 (CUDA 13.x driver compatibility)
+#   docker exec witness-hunyuan-build \
+#     /workspace/miniconda3/envs/hunyuan3d21/bin/pip install \
+#     --index-url https://download.pytorch.org/whl/cu130 \
+#     torch==2.12.0+cu130 torchvision==0.27.0+cu130
+#   # 2. Patch api_models.py: raise num_inference_steps cap (le=20→200) + add images field
+#   docker cp tools/hunyuan_patch/api_models.py \
+#     witness-hunyuan-build:/workspace/Hunyuan3D-2.1-CachedStart/api_models.py
+#   docker commit witness-hunyuan-build witness-hunyuan-sm120:latest
+#   docker stop witness-hunyuan-build
 
 # Pipeline-side tooling
 which gltf-pipeline                        # ~/.npm-global/bin/gltf-pipeline
@@ -40,6 +53,13 @@ python3 -c "import trimesh"                # optimize_asset.py detached-island s
 # or persistently with the env var WITNESS_MULTI_VIEW_PYTHON.
 /home/royce3/ComfyUI/venv/bin/python -c "import diffusers, accelerate, torch; print(diffusers.__version__, torch.__version__, torch.cuda.is_available())"
 # Expect: diffusers ≥ 0.30, torch ≥ 2.0+cuXXX, True
+
+# Stage 0.5 ALSO needs rembg for background removal — required for BOTH the
+# Zero123++ synth path and the --real-views real-photo path. Without it the
+# subject cut-out no-ops (loud warning) and the input background fuses into a
+# flat slab ('triangular prism').
+/home/royce3/ComfyUI/venv/bin/python -c "import rembg, onnxruntime; print('rembg', rembg.__version__)" \
+  || echo "MISSING rembg — install: /home/royce3/ComfyUI/venv/bin/pip install rembg onnxruntime"
 
 # Stage 0.25 (FLUX.2 [klein] ref refinement) — runs ALWAYS for mesh/animated
 # kinds unless --no-refine-ref is passed. Needs three files (verified against
@@ -243,124 +263,61 @@ If `/docs` returns 200, the server is ready.
 
 ## 4. Run the asset pipeline against the server
 
-Once the server is up, the orchestrator one-liner from
-`PHASE1_ASSET_LIST.md` works. Example for the hero ledger prop:
+Use `tools/witness.py` — the single user-facing CLI. It handles server
+management, VRAM scheduling, smart ref detection, and all pipeline flags.
 
 ```bash
 cd /home/royce3/Desktop/Witness-Interactive-3D
 
-# Drop a reference image at prompts/asset-templates/prop_ledger_book/ref.png
-# then:
-python tools/asset_pipeline.py prop_ledger_book --kind mesh \
-  --image prompts/asset-templates/prop_ledger_book/ref.png \
-  --era shared
+# Full pipeline — auto-generates ref.png if missing, uses all installed models
+python tools/witness.py generate prop_ledger_book
+
+# Skip SDXL projection (procedural bake only — faster, lower quality)
+python tools/witness.py generate prop_ledger_book --fast
+
+# Override FLUX.2 [klein] refinement strength
+python tools/witness.py generate prop_ledger_book --refine-strength 0.35
+
+# Skip refinement entirely (ref.png already on-style)
+python tools/witness.py generate prop_altar_candle --no-refine-ref
+
+# Multi-view shape inference (recommended for trees and roofs)
+python tools/witness.py generate vegetation_eucalyptus_mature --multi-view
 ```
 
-The orchestrator chains: generate → **AI-projected PBR bake** → optimize (detached-island strip +
-Draco) → register (writes `docs/asset-index.md`) → export (copies to
-`witness-interactive-vite/public/assets/<id>.glb`).
+The pipeline chains: Flux.1 [dev] ref gen (if needed) → FLUX.2 [klein]
+refinement → Hunyuan3D shape → Blender Cycles PBR bake → SDXL + depth
+ControlNet AI projection → Blender UV reprojection → Draco optimize →
+register (`docs/asset-index.md`) → export (`public/assets/<id>.glb`).
 
 ### Stage 2 — AI texture projection (default ON)
 
-After Hunyuan shape generation the pipeline runs `tools/texture_asset.py --ai-project`:
+After Hunyuan shape generation the pipeline runs stage 2b (SDXL + depth
+ControlNet) then stage 2c (Blender UV reprojection):
 
-1. **6-view render** — Blender renders beauty + depth EXR for each of 6 canonical views.
-2. **SDXL + ControlNet depth** — ComfyUI projects PBR-styled diffuse maps onto each view (requires ComfyUI running on `:8188`).
-3. **Blender Cycles bake** — Projected maps drive a Principled BSDF bake at 4K (props) / 8K (hero). Outputs albedo, metallic-roughness (R=unused, G=roughness, B=metallic), and normal maps to `processed/textures/<id>/`.
-4. **GLB re-export** — `processed/glb/<id>.textured.glb` is the input to Draco optimization.
+1. **6-view render** — Blender renders beauty + depth EXR for 6 canonical views.
+2. **SDXL + ControlNet depth** — ComfyUI projects PBR-styled diffuse maps (ComfyUI on `:8188`).
+3. **UV reprojection** — Blender perspective-projects the AI view maps onto the mesh UV; weighted by face normals.
+4. **GLB re-export** — AI albedo replaces procedural albedo; model ships with correct color.
 
-To skip the SDXL step and use procedural materials only (faster, lower quality):
-```bash
-python tools/asset_pipeline.py <id> --kind mesh --no-ai-project
-```
+Pass `--fast` to skip stages 2b/2c (procedural bake only).
 
-### Refining ref images (stage 0.25)
-
-The orchestrator **always** runs stage 0.25 for `--kind mesh|animated`
-unless `--no-refine-ref` is passed. The pass pushes the ref through
-FLUX.2 [klein] 9B Base img2img to normalise the Digital Diorama palette
-+ 1994 Rwanda documentary look, so hand-picked refs from the open web
-and Flux.1 [dev] stage-0 outputs both land on the same visual baseline
-before stage 0.5 (Zero123++) and stage 1 (Hunyuan3D) see them.
-
-**Per-category denoise defaults** (from
-[`tools/asset_pipeline.py`](asset_pipeline.py) `REFINE_STRENGTH_BY_CATEGORY`):
+### Per-category ref refinement defaults (stage 0.25)
 
 | Category prefix | Denoise | Rationale |
 |---|---|---|
-| `vegetation_` | 0.60 | Strong palette restyle; foliage colour varies wildly in stock photos and silhouette tolerance is high. |
-| `structure_`  | 0.40 | Protect doorways / roof pitches / window placement. A small palette nudge is enough. |
-| `prop_`       | 0.50 | Hero objects (ledger, candle, frame). Materials + geometry both stay close. |
-| `figure_`     | 0.50 | Hands / people. Higher denoise warps anatomy. |
-| (anything else) | 0.50 | Fallback (`DEFAULT_REFINE_STRENGTH`). |
+| `vegetation_` | 0.60 | Strong palette restyle; foliage colour varies wildly. |
+| `structure_`  | 0.40 | Protect doorways / roof pitches / window placement. |
+| `prop_`       | 0.50 | Hero objects (ledger, candle, frame). |
+| `figure_`     | 0.50 | Hands / people — higher denoise warps anatomy. |
+| (other)       | 0.50 | Fallback. |
 
-Override per-run with `--refine-ref-strength <0..1>`.
-
-**Archive scheme.** First run copies `ref.png` → `ref.original.png` then
-overwrites `ref.png` with the refined output. Re-runs read from
-`ref.original.png` so denoise does not compound. The script no-ops when
-`ref.original.png` already exists; pass `--refine-ref-force` to re-refine
-(useful when changing strength or prompt suffix).
-
-```bash
-# Default: per-category strength, no flags needed
-python tools/asset_pipeline.py vegetation_eucalyptus_mature --kind mesh \
-  --image prompts/asset-templates/vegetation_eucalyptus_mature/ref.png \
-  --multi-view --era shared
-
-# Override strength for one asset
-python tools/asset_pipeline.py prop_ledger_book --kind mesh \
-  --image prompts/asset-templates/prop_ledger_book/ref.png \
-  --refine-ref-strength 0.35
-
-# Opt out entirely (ref already on-style, do not push further)
-python tools/asset_pipeline.py prop_altar_candle --kind mesh \
-  --image prompts/asset-templates/prop_altar_candle/ref.png \
-  --no-refine-ref
-```
-
-> **VRAM coordination.** Stage 0.25 runs inside ComfyUI (same process as
-> stage 0). Make sure the Hunyuan container is up but idle when stage
-> 0.25 fires — ComfyUI peaks ~22 GB loading FLUX.2 klein at fp8, and the
-> 5090's 32 GB cannot also hold Hunyuan's shape model. The orchestrator
-> calls stage 0.25 → ComfyUI exits → stage 0.5 (Zero123++) → its venv
-> exits → stage 1 (Hunyuan) — only one big model resident at a time.
-
-### Multi-view (stage 0.5) for assets that benefit from it
-
-Single-view Hunyuan inference sometimes flattens silhouette caps — most
-visible on the crowns of trees and the tops of tall objects. Pass
-`--multi-view` to insert stage 0.5 (Zero123++ v1.2): the orchestrator
-synthesises six canonical views from `ref.png` and sends all of them to
-the patched worker as a list payload.
-
-```bash
-python tools/asset_pipeline.py vegetation_eucalyptus_mature --kind mesh \
-  --image prompts/asset-templates/vegetation_eucalyptus_mature/ref.png \
-  --multi-view --era shared
-```
-
-Sequential VRAM coordination: Flux ComfyUI exits → Zero123++ runs in its
-own process → Hunyuan container picks up the views. The 5090's 32 GB
-holds at most one of these at a time.
-
-> **Interpreter selection.** Stage 0.5 needs `diffusers + torch` (plus
-> `accelerate`). The orchestrator runs `generate_multi_views.py` under the
-> path in `--multi-view-python` (default `/home/royce3/ComfyUI/venv/bin/python`,
-> persistently overridable via `WITNESS_MULTI_VIEW_PYTHON`). If neither the
-> default nor the override points at a venv with diffusers installed,
-> stage 0.5 fails fast with the missing-import error — `asset_pipeline.py`
-> aborts before stage 1 fires, so no half-built GLB lands in `processed/`.
+Override: `--refine-strength <0..1>`. Re-refine: `--refine-force`.
 
 ### Batch all Phase 1 assets
 
-After every reference image is in place, this loop walks the catalogue.
-Run from the repo root; failures continue to the next id but exit non-zero
-overall:
-
-```bash
-set -e
-for id in \
+```fish
+python tools/witness.py batch \
   structure_rugo_main_house \
   structure_rugo_tin_roof \
   structure_rugo_door \
@@ -373,17 +330,15 @@ for id in \
   vegetation_elephant_grass \
   prop_ledger_book \
   prop_altar_photo_frame \
-  prop_altar_candle ; do
-    img="prompts/asset-templates/$id/ref.png"
-    [ -f "$img" ] || { echo "skip $id (no ref.png)"; continue; }
-    echo "── $id ──"
-    python tools/asset_pipeline.py "$id" --kind mesh --image "$img" --era shared || echo "FAIL $id"
-done
+  prop_altar_candle
 ```
 
-The two `figure_*_hands` assets use `--kind animated` and require an
-additional `--rig <path>.blend`, so they stay out of the bulk loop until
-the Blender rig pass lands.
+For flat-top assets (trees, roofs), add `--multi-view`.
+The two `figure_*_hands` assets use `--kind animated --rig <path>.blend`.
+```fish
+python tools/witness.py batch \
+  vegetation_eucalyptus_mature vegetation_eucalyptus_sapling --multi-view
+```
 
 ---
 
@@ -417,10 +372,12 @@ warm cache.
 | Stage 0.25 fails with `POST /upload/image failed: 413` or similar size error | Source ref.png larger than ComfyUI's default upload limit. | Pre-downscale the ref to ≤ 2048² before re-running. The refine pass writes at 1024² regardless, so a > 2K source is wasted bandwidth anyway. |
 | `optimize_asset.py` skips the cleanup step with `trimesh not installed` | The new detached-island strip relies on `trimesh`. | `pip install trimesh` (in the same Python env that runs the orchestrator). The pipeline still completes — Draco runs on the raw GLB — but floating islands ship to the runtime. |
 | `generate_asset.py` reports `ERROR: Timed out after 1800s` while `/status` keeps returning `processing` | The `model_worker.py` bind-mount is missing, so the upstream worker's silent-fallback bug leaves only `{uid}_initial.glb` in `gradio_cache/`. The `/status/{uid}` endpoint only reports `completed` when `{uid}_textured.glb` exists, so the client polls until timeout. `docker logs witness-hunyuan` shows `Texture generation failed: CUDA error: no kernel image is available for execution on the device` (sm_120 not in `hy3dpaint`'s compiled kernels) followed by `Using untextured mesh as fallback`. | 1. Stop the container. 2. Restart with the `tools/hunyuan_patch/model_worker.py` bind-mount from §2. 3. Optionally recover the stuck job's mesh: `docker cp witness-hunyuan:/workspace/Hunyuan3D-2.1-CachedStart/gradio_cache/<uid>_initial.glb processed/glb/raw/<asset_id>.glb`. |
-| `generate_asset.py` reports `ERROR: status=completed but model_base64 missing` (status goes `processing → completed` in ~10 s, but GLB is empty) | PyTorch ≤ 2.5.x was compiled without sm_120 (Blackwell) kernels. `F.conv2d` in the DINOv2 image conditioner crashes immediately, the sentinel 0-byte `_textured.glb` is written, and `api_server.py` returns `completed` with an empty payload. | **One-time fix — upgrade PyTorch inside the container:** `docker exec witness-hunyuan conda run -n hunyuan3d21 pip install --upgrade "torch==2.7.0" "torchvision==0.22.0" --index-url https://download.pytorch.org/whl/cu128` then `docker restart witness-hunyuan`. PyTorch 2.7.0+cu128 is the first release with sm_120 kernels. Note: the container needs ~4 GB of free disk space for the download; if the host drive is full, move `/var/lib/docker` to a larger partition first (see §0 pre-flight). |
+| `generate_asset.py` reports `ERROR: status=completed but model_base64 missing` (status goes `processing → completed` in ~10 s, but GLB is empty) | PyTorch compiled without sm_120 (Blackwell/RTX 5090) kernels. `F.conv2d` in the DINOv2 image conditioner crashes immediately; the sentinel 0-byte GLB is written and the API returns `completed` with an empty payload. | **Already fixed** — `witness.py` now starts `witness-hunyuan-sm120:latest` (torch 2.11.0+cu128 with sm_120 support). If you see this again after rebuilding, re-run the commit step: `docker exec witness-hunyuan /workspace/miniconda3/envs/hunyuan3d21/bin/pip install --upgrade torch --index-url https://download.pytorch.org/whl/cu128 && docker commit witness-hunyuan witness-hunyuan-sm120:latest`. |
 | `Generation failed: CUDA out of memory` | 32 GB VRAM exhausted (large `--steps`, multi-batch, or stale state). | Lower `--steps` to 30 (iteration mode) or restart the container to reset CUDA state. The RTX 5090's 32 GB handles `--steps 50` with margin for a single asset. |
 | `expected raw GLB at processed/glb/raw/<id>.glb but it was not produced` | Hunyuan completed but wrote to an unexpected path, or the download step silently truncated. | `docker logs witness-hunyuan` — look for a non-200 result download URL. Re-run the orchestrator; the optimize step is idempotent on existing files. |
 | Container exits immediately after `docker run` with no error | `--gpus all` requires nvidia-container-toolkit; check `docker info \| grep nvidia`. | `sudo systemctl restart docker` after `sudo nvidia-ctk runtime configure --runtime=docker` if the runtime line is missing. |
+| `RuntimeError: CUDA unknown error` (error 999) on startup — container exits ~40 s after start | RTX 5090 + driver 595.71.05 + CDI-only GPU pass-through: `cuInit()` fails without full device capability access. **Root cause:** Docker daemon is configured with CDI only (`docker info` shows no `nvidia` runtime). | **Already fixed in witness.py** — the container now starts with `--privileged`. This grants full device access. If you need to remove `--privileged`, run `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker` and then remove the flag. |
+| `torch: 2.11.0+cu128` fails with CUDA unknown error even with correct image | cu128 PyTorch cannot initialize CUDA against driver 595.71.05 / CUDA 13.2 in CDI mode. | **Already fixed** — `witness-hunyuan-sm120:latest` now ships `torch 2.12.0+cu130` + `torchvision 0.27.0+cu130`. Rebuild: `docker run -d --gpus all --privileged --name witness-hunyuan-build witness-hunyuan-sm120:latest sleep 3600 && docker exec witness-hunyuan-build /workspace/miniconda3/envs/hunyuan3d21/bin/pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.12.0+cu130 torchvision==0.27.0+cu130 && docker commit witness-hunyuan-build witness-hunyuan-sm120:latest && docker stop witness-hunyuan-build`. |
 | `gltf-pipeline` warns but pipeline still succeeds | Tool installed but `--separate` flag misordered. | Harmless — the optimize step writes `<id>.optimized.glb` either way. The orchestrator promotes it to `<id>.glb`. |
 | `toktx` missing → "Skipping KTX2 compression" | Optional dependency absent. | Install via AUR: `paru -S ktx-software-bin`. Pipeline succeeds without it, just larger textures. |
 | Generated GLB looks "soft" / lacking detail | Reference image too low-res, too dark, or too saturated. | Re-shoot reference per `prompts/asset-templates/_STYLE_GUIDE.md` (≥ 1024², overcast 5000 K, neutral background, desaturated). Bump `--steps 60` for hero assets. |
@@ -446,8 +403,40 @@ warm cache.
 
 ## 8. Quick reference card
 
+```fish
+cd /home/royce3/Desktop/Witness-Interactive-3D
+
+# Boot both servers (ComfyUI + Hunyuan3D)
+python tools/witness.py start
+
+# Or boot individually
+python tools/witness.py start --no-hunyuan   # ComfyUI only
+python tools/witness.py start --no-comfy     # Hunyuan3D only (manual docker approach still works)
+
+# Health check
+python tools/witness.py status
+
+# Generate a single asset (all pipeline stages, all installed models)
+python tools/witness.py generate <id>
+
+# With multi-view (for flat-top assets: trees, roofs)
+python tools/witness.py generate <id> --multi-view
+
+# Fast mode (skip SDXL projection — procedural bake only)
+python tools/witness.py generate <id> --fast
+
+# Override ref refinement strength
+python tools/witness.py generate <id> --refine-strength 0.35
+
+# Batch
+python tools/witness.py batch <id1> <id2> <id3>
+
+# Shutdown both
+python tools/witness.py stop
+```
+
+If you need to start Hunyuan3D manually (e.g. before witness.py is available):
 ```bash
-# Boot
 cd /home/royce3/Desktop/Witness-Interactive-3D
 docker run --rm -d --gpus all -p 8081:8081 \
   -v "$PWD/model_cache:/workspace/model_cache" \
@@ -455,20 +444,5 @@ docker run --rm -d --gpus all -p 8081:8081 \
   -v "$PWD/tools/hunyuan_patch/model_worker.py:/workspace/Hunyuan3D-2.1-CachedStart/model_worker.py:ro" \
   --name witness-hunyuan \
   kechiro/hunyuan3d-2.1-cachedstart:latest python3 api_server.py
-docker logs -f witness-hunyuan    # wait for "Uvicorn running on http://0.0.0.0:8081"
-
-# Health
-curl -s http://localhost:8081/docs >/dev/null && echo OK
-
-# Single asset
-python tools/asset_pipeline.py <id> --kind mesh \
-  --image prompts/asset-templates/<id>/ref.png
-
-# Single asset with multi-view (stage 0.5 — for flat-top assets)
-python tools/asset_pipeline.py <id> --kind mesh \
-  --image prompts/asset-templates/<id>/ref.png \
-  --multi-view
-
-# Shutdown
-docker stop witness-hunyuan
+docker logs -f witness-hunyuan   # wait for "Uvicorn running on http://0.0.0.0:8081"
 ```

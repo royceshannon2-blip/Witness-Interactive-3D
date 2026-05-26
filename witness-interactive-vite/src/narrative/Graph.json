@@ -62,6 +62,7 @@
       "title": "The Hidden Cellar",
       "description": "Discover hidden cellar beneath family well with evidence of hiding",
       "location": "family_compound_cellar",
+      "fragmentId": "cellar_door_latch",
       "requiredFlags": ["act_2_started"],
       "unlocksFlags": ["found_cellar_evidence", "evidence_hider_path"],
       "next": ["act_2_check_all_evidence"]
@@ -73,6 +74,7 @@
       "title": "The Lake Shore",
       "description": "Find boat paddle, maps, and evidence of escape routes across Lake Kivu",
       "location": "lake_shore",
+      "fragmentId": "boat_paddle",
       "requiredFlags": ["act_2_started"],
       "unlocksFlags": ["found_boat_evidence", "evidence_escapist_path"],
       "next": ["act_2_check_all_evidence"]
@@ -84,6 +86,7 @@
       "title": "The Ravine",
       "description": "Locate the observer's vantage point with evidence of watching/silence",
       "location": "ravine_vantage",
+      "fragmentId": "observer_notes",
       "requiredFlags": ["act_2_started"],
       "unlocksFlags": ["found_observer_evidence", "evidence_observer_path"],
       "next": ["act_2_check_all_evidence"]
@@ -95,6 +98,7 @@
       "title": "Family Records",
       "description": "Collect photographs, documents, and personal items from the compound",
       "location": "family_compound",
+      "fragmentId": "family_records",
       "requiredFlags": ["act_2_started"],
       "unlocksFlags": ["found_family_records"],
       "next": ["act_2_check_all_evidence"]
@@ -159,6 +163,7 @@
       "title": "Cellar Reconstruction",
       "description": "Match hidden neighbor artifacts to names and ledger entries",
       "location": "family_compound_cellar",
+      "fragmentId": "cellar_mats",
       "requiredFlags": ["path_a_started"],
       "unlocksFlags": ["puzzle_a1_complete"],
       "next": ["act_3a_puzzle_2"]
@@ -170,6 +175,7 @@
       "title": "Evidence of Risk",
       "description": "Piece together militia patrols, cellar vulnerabilities, supply runs",
       "location": "family_compound_area",
+      "fragmentId": "water_schedule",
       "requiredFlags": ["puzzle_a1_complete"],
       "unlocksFlags": ["puzzle_a2_complete"],
       "next": ["act_3a_puzzle_3"]
@@ -181,6 +187,7 @@
       "title": "The Cost",
       "description": "Discover post-1994 letter from hidden neighbor; uncover final journal entry",
       "location": "family_shrine",
+      "fragmentId": "neighbor_letter",
       "requiredFlags": ["puzzle_a2_complete"],
       "unlocksFlags": ["puzzle_a3_complete"],
       "next": ["act_3a_reflection"]
@@ -225,6 +232,7 @@
       "title": "The Lake Route",
       "description": "Piece together safe houses, villages, and checkpoints on escape route",
       "location": "lake_shore",
+      "fragmentId": "passenger_list",
       "requiredFlags": ["path_b_started"],
       "unlocksFlags": ["puzzle_b1_complete"],
       "next": ["act_3b_puzzle_2"]
@@ -236,6 +244,7 @@
       "title": "The Selection",
       "description": "Discover who made it across and who didn't; understand the choices",
       "location": "family_compound",
+      "fragmentId": "boat_capacity_notes",
       "requiredFlags": ["puzzle_b1_complete"],
       "unlocksFlags": ["puzzle_b2_complete"],
       "next": ["act_3b_puzzle_3"]
@@ -247,6 +256,7 @@
       "title": "The Journey",
       "description": "Retrace escape route; discover dangers, survivors' accounts, loss",
       "location": "bisesero_hills",
+      "fragmentId": "escape_route_map",
       "requiredFlags": ["puzzle_b2_complete"],
       "unlocksFlags": ["puzzle_b3_complete"],
       "next": ["act_3b_puzzle_4"]
@@ -258,6 +268,7 @@
       "title": "The Afterward",
       "description": "Find post-1994 letters from survivors and the unnamed group that wasn't saved",
       "location": "family_shrine",
+      "fragmentId": "survivor_letter",
       "requiredFlags": ["puzzle_b3_complete"],
       "unlocksFlags": ["puzzle_b4_complete"],
       "next": ["act_3b_reflection"]
@@ -302,6 +313,7 @@
       "title": "The Vantage Point",
       "description": "Map all events visible from the ravine; understand what Grandpa saw",
       "location": "ravine_vantage",
+      "fragmentId": "chalk_patrol_marks",
       "requiredFlags": ["path_c_started"],
       "unlocksFlags": ["puzzle_c1_complete"],
       "next": ["act_3c_puzzle_2"]
@@ -313,6 +325,7 @@
       "title": "The Moral Inventory",
       "description": "Discover what Grandpa knew, where people were, what he didn't reveal",
       "location": "ravine_area",
+      "fragmentId": "checkpoint_records",
       "requiredFlags": ["puzzle_c1_complete"],
       "unlocksFlags": ["puzzle_c2_complete"],
       "next": ["act_3c_puzzle_3"]
@@ -324,6 +337,7 @@
       "title": "The Rationalization",
       "description": "Find unsent letters, journal entries justifying inaction and silence",
       "location": "family_shrine",
+      "fragmentId": "reflection_letters",
       "requiredFlags": ["puzzle_c2_complete"],
       "unlocksFlags": ["puzzle_c3_complete"],
       "next": ["act_3c_puzzle_4"]
@@ -335,6 +349,7 @@
       "title": "The Aftermath",
       "description": "Discover visitor's account of Grandpa's isolation post-1994; read final question",
       "location": "family_compound",
+      "fragmentId": "visitor_account",
       "requiredFlags": ["puzzle_c3_complete"],
       "unlocksFlags": ["puzzle_c4_complete"],
       "next": ["act_3c_reflection"]
@@ -368,7 +383,7 @@
       "title": "Remembrance",
       "description": "Return to family compound in modern day; reflect on Grandpa's choice and legacy",
       "location": "family_compound",
-      "requiredFlags": ["path_a_complete", "path_b_complete", "path_c_complete"],
+      "requiredFlags": [],
       "unlocksFlags": ["act_4_started"],
       "next": ["act_4_conclusion"]
     },

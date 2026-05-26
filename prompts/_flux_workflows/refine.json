@@ -1,0 +1,80 @@
+{
+  "_comment": "Witness asset pipeline — STAGE 0.25 ref-refinement workflow (FLUX.2 [klein] 9B Base, FP8, img2img). Orchestrator inserts this between stage 0 (hand-picked OR Flux.1-generated ref.png) and stage 0.5 (Zero123++) when --kind is mesh|animated. Per-category denoise (__STRENGTH__): vegetation 0.60, prop/figure 0.50, structure 0.40. The ref source is uploaded to ComfyUI's input/ directory by refine_ref_image.py and referenced via __REF_FILENAME__. NODE CONTRACT (verified against ComfyUI's official FLUX.2 Klein 9B template, 2026-05): UNETLoader loads the FP8 diffusion model from diffusion_models/ (NOT unet/); CLIPLoader is single (NOT DualCLIPLoader) with type=flux2 pointing at Qwen-3 8B FP8-mixed; VAELoader uses the dedicated flux2-vae; KSampler with cfg=1.0 replaces the FLUX.1 BasicGuider+FluxGuidance+SamplerCustomAdvanced chain (FLUX.2 does not use FluxGuidance). If BFL or ComfyUI changes any of this, update both this file and tools/HUNYUAN_RUNBOOK.md §0 in lockstep.",
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "__REF_FILENAME__"
+    }
+  },
+  "5": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["4", 0],
+      "vae": ["10", 0]
+    }
+  },
+  "6": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "__PROMPT__",
+      "clip": ["11", 0]
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "blurry, low quality, oversaturated, watermark, signature, text overlay, harsh shadows, golden hour, blue hour, lens flare, bokeh artifacts, distorted geometry, warped anatomy",
+      "clip": ["11", 0]
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["13", 0],
+      "vae": ["10", 0]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "witness_ref_refined",
+      "images": ["8", 0]
+    }
+  },
+  "10": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    }
+  },
+  "11": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "weight_dtype": "default"
+    }
+  },
+  "12": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-2-klein-base-9b-fp8.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "13": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": "__SEED__",
+      "steps": 40,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": "__STRENGTH__",
+      "model": ["12", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    }
+  }
+}

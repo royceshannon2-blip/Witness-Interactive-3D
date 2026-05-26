@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "clips": {
+    "idle": {
+      "start": 0,
+      "end": 47,
+      "loop": true,
+      "type": "locomotion"
+    },
+    "walking": {
+      "start": 47,
+      "end": 71,
+      "loop": true,
+      "type": "locomotion"
+    },
+    "walking_back": {
+      "start": 71,
+      "end": 100,
+      "loop": true,
+      "type": "locomotion"
+    },
+    "strafe_left": {
+      "start": 100,
+      "end": 122,
+      "loop": true,
+      "type": "locomotion"
+    },
+    "strafe_right": {
+      "start": 122,
+      "end": 144,
+      "loop": true,
+      "type": "locomotion"
+    },
+    "running": {
+      "start": 144,
+      "end": 161,
+      "loop": true,
+      "type": "locomotion"
+    }
+  }
+}

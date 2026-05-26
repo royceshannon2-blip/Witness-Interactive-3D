@@ -9,3 +9,30 @@ dist/
 
 # Keep rules but ignore local environment logs
 !.claude/rules/
+
+# Local AI source installs (large, machine-specific)
+tools/higgs_audio_src/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Machine-specific hardware config (NVIDIA CDI spec, not a project file)
+-.yaml
+
+# Model weights (41 GB+, never committed)
+model_cache/
+
+# Pre-baked audio (7.5 GB+, distributed separately)
+audios/
+
+# Cloned Babylon.js reference docs (1.5 GB, re-cloneable)
+docs/reference/
+
+# Generated pipeline intermediates (textures, raw meshes, view images)
+processed/textures/
+processed/glb/raw/
+processed/views/
+
+# Large POC prototype assets (not shipped)
+witness-interactive-vite/public/assets/poc_rigged.glb

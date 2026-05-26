@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import math
 import os
 import sys
 from pathlib import Path
@@ -100,11 +101,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--family", default="auto", help="Material family override (default auto-pick from asset_id).")
     p.add_argument("--texture-size", type=int, default=8192)
     p.add_argument("--view-size", type=int, default=1024)
+    p.add_argument("--target-faces", type=int, default=40000,
+                   help="Decimate mesh to this face count before UV unwrap + bake (default 40000). "
+                        "Set 0 to disable.")
     p.add_argument("--textures-dir", required=True)
     p.add_argument("--views-dir", required=True)
     p.add_argument("--output-glb", required=True)
     p.add_argument("--samples", type=int, default=128, help="Cycles samples per bake / render.")
     p.add_argument("--skip-views", action="store_true", help="Skip the 6-view render pass.")
+    p.add_argument(
+        "--hdri",
+        default=None,
+        help=(
+            "Optional HDRI/EXR path used as the world environment for the "
+            "6-view conditioning renders. If omitted, the Hosek-Wilkie / "
+            "Preetham procedural sky is used (5.1 dropped the Nishita model)."
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -140,6 +153,28 @@ def import_glb(path: Path) -> list:
     bpy.ops.import_scene.gltf(filepath=str(path))
     added = set(bpy.data.objects) - before
     return [o for o in added if o.type == "MESH"]
+
+
+def decimate_meshes(meshes: list, target_faces: int) -> None:
+    """
+    Apply a Decimate modifier to each mesh to hit target_faces total before
+    UV unwrap. Decimating here (before Smart UV Project) keeps UV seams
+    minimal and prevents the 5-6× vertex explosion that UV unwrapping a
+    high-res Hunyuan mesh causes at the optimize step.
+    """
+    total = sum(len(obj.data.polygons) for obj in meshes)
+    if total <= target_faces:
+        sys.stdout.write(f"[bake_pbr] decimate: already at {total:,} faces — skipping\n")
+        return
+    ratio = max(0.001, target_faces / total)
+    sys.stdout.write(f"[bake_pbr] decimate: {total:,} → ~{target_faces:,} faces (ratio {ratio:.4f})\n")
+    for obj in meshes:
+        mod = obj.modifiers.new(name="Decimate", type="DECIMATE")
+        mod.ratio = ratio
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    after = sum(len(obj.data.polygons) for obj in meshes)
+    sys.stdout.write(f"[bake_pbr] decimate: result {after:,} faces\n")
 
 
 def ensure_uvs(meshes: list) -> None:
@@ -304,6 +339,55 @@ def bake_channel(
     material.node_tree.nodes.remove(tex)
 
 
+def wire_baked_material(
+    material: "bpy.types.Material",
+    albedo_path: Path,
+    mr_path: Path,
+    normal_path: Path,
+) -> None:
+    """
+    Replace the procedural node network with Image Texture nodes so the
+    baked maps are embedded in the exported GLB.
+
+    glTF cannot represent Blender's Noise/Voronoi procedural nodes, so
+    exporting with the procedural network in place produces a white material.
+    This function clears those nodes and wires a standard glTF-compatible
+    Principled BSDF setup: albedo → Base Color, MR → Metallic/Roughness
+    (via separate-RGB so G→Roughness, B→Metallic), Normal → Normal Map.
+    """
+    nt = material.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
+    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+
+    def _tex(path: Path, is_data: bool = False) -> "bpy.types.ShaderNode":
+        img = bpy.data.images.load(str(path))
+        img.colorspace_settings.name = "Non-Color" if is_data else "sRGB"
+        node = nt.nodes.new("ShaderNodeTexImage")
+        node.image = img
+        return node
+
+    # Albedo → Base Color
+    alb = _tex(albedo_path, is_data=False)
+    nt.links.new(alb.outputs["Color"], bsdf.inputs["Base Color"])
+
+    # MR pack → Roughness (G) + Metallic (B)
+    mr = _tex(mr_path, is_data=True)
+    sep = nt.nodes.new("ShaderNodeSeparateColor")
+    nt.links.new(mr.outputs["Color"], sep.inputs["Color"])
+    nt.links.new(sep.outputs["Green"], bsdf.inputs["Roughness"])
+    nt.links.new(sep.outputs["Blue"], bsdf.inputs["Metallic"])
+
+    # Normal map
+    nrm = _tex(normal_path, is_data=True)
+    nmap = nt.nodes.new("ShaderNodeNormalMap")
+    nt.links.new(nrm.outputs["Color"], nmap.inputs["Color"])
+    nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+
+
 def bake_mr_pack(meshes: list, material: "bpy.types.Material", target_size: int, output_path: Path) -> None:
     """
     Bake Babylon's MR pack: R unused, G roughness, B metallic.
@@ -345,6 +429,24 @@ def bake_mr_pack(meshes: list, material: "bpy.types.Material", target_size: int,
 # ---------------------------------------------------------------------------
 # 6-view render (for AI projection step downstream)
 # ---------------------------------------------------------------------------
+#
+# Pre-2026-05-22 the orchestrator emitted six pure-black PNGs here: factory
+# startup wipes the default light, `film_transparent=True` leaves un-shaded
+# pixels black, and the previous implementation added neither a world
+# environment nor any scene lights. SDXL stage 2b then conditioned on pitch
+# darkness and projected fill-colour over ~57 % of the albedo (the documented
+# "two flat white squares" canary failure).
+#
+# The refactor:
+#   1. Adds a bright HDRI-style world (Hosek-Wilkie sky by default, or an
+#      `--hdri` EXR) so every face of the mesh receives ambient illumination.
+#   2. Attaches a per-view soft area key light positioned relative to the
+#      camera so each of the six cameras gets the same "above-and-to-the-left"
+#      key — consistent shading across views keeps SDXL conditioning stable.
+#   3. Wires the Blender 5.1 compositor (`compositing_node_group` API, with
+#      a single CompositorNodeOutputFile per view) so the depth pass lands
+#      next to the beauty PNG as a 32-bit single-layer EXR — the input
+#      stage 2b's depth ControlNet expects.
 
 CANONICAL_VIEWS: list[tuple[str, tuple[float, float, float]]] = [
     ("front",  ( 0.0,  4.0, 0.0)),
@@ -356,16 +458,22 @@ CANONICAL_VIEWS: list[tuple[str, tuple[float, float, float]]] = [
 ]
 
 
-def fit_camera_to_meshes(meshes: list, offset: Vector) -> "bpy.types.Object":
-    """Drop a camera at world `offset` aimed at the bbox centre of the meshes."""
-    corners_world: list[Vector] = []
+def _bbox_centre_and_diag(meshes: list) -> tuple[Vector, float]:
+    """Return (world-space bbox centre, bbox diagonal length) of all meshes."""
+    corners: list[Vector] = []
     for obj in meshes:
         for c in obj.bound_box:
-            corners_world.append(obj.matrix_world @ Vector(c))
-    bb_min = Vector((min(c.x for c in corners_world), min(c.y for c in corners_world), min(c.z for c in corners_world)))
-    bb_max = Vector((max(c.x for c in corners_world), max(c.y for c in corners_world), max(c.z for c in corners_world)))
+            corners.append(obj.matrix_world @ Vector(c))
+    bb_min = Vector((min(c.x for c in corners), min(c.y for c in corners), min(c.z for c in corners)))
+    bb_max = Vector((max(c.x for c in corners), max(c.y for c in corners), max(c.z for c in corners)))
     centre = (bb_min + bb_max) * 0.5
-    diag = (bb_max - bb_min).length
+    diag = max((bb_max - bb_min).length, 1.0)
+    return centre, diag
+
+
+def fit_camera_to_meshes(meshes: list, offset: Vector) -> "bpy.types.Object":
+    """Drop a camera at world `offset` aimed at the bbox centre of the meshes."""
+    centre, diag = _bbox_centre_and_diag(meshes)
 
     cam_data = bpy.data.cameras.new("WitnessCam")
     cam_data.lens = 50.0
@@ -385,30 +493,160 @@ def fit_camera_to_meshes(meshes: list, offset: Vector) -> "bpy.types.Object":
     return cam_obj
 
 
-def render_views(meshes: list, views_dir: Path, view_size: int, samples: int) -> None:
+def setup_world_environment(hdri_path: Path | None) -> None:
     """
-    Render the 6 canonical views. Each view writes <view>.png plus
-    <view>.depth.exr (16-bit linear depth) for the downstream AI projector.
+    Configure a bright world background so the conditioning renders are lit.
+
+    Without this the factory-empty world (created by ``reset_scene()``) plus
+    ``film_transparent=True`` produced pure-black views. World strength is
+    pushed to 2.5 because the only directional lighting is the per-view key —
+    the HDRI is the bulk illumination source.
+
+    Sky model selection mirrors `render_validation.py`: 5.x dropped the
+    Nishita enum and split scattering across MULTIPLE_SCATTERING /
+    HOSEK_WILKIE / PREETHAM. We try them in fidelity order.
+    """
+    world = bpy.data.worlds.new("WitnessBakeWorld")
+    bpy.context.scene.world = world
+    world.use_nodes = True
+    nt = world.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    bg = nt.nodes.new("ShaderNodeBackground")
+    bg.inputs["Strength"].default_value = 2.5
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+
+    if hdri_path and hdri_path.exists():
+        env = nt.nodes.new("ShaderNodeTexEnvironment")
+        env.image = bpy.data.images.load(str(hdri_path))
+        nt.links.new(env.outputs["Color"], bg.inputs["Color"])
+    else:
+        sky = nt.nodes.new("ShaderNodeTexSky")
+        for candidate in ("MULTIPLE_SCATTERING", "HOSEK_WILKIE", "PREETHAM"):
+            try:
+                sky.sky_type = candidate
+                break
+            except TypeError:
+                continue
+        for attr, value in (("sun_elevation", math.radians(58.0)), ("sun_rotation", math.radians(135.0))):
+            if hasattr(sky, attr):
+                setattr(sky, attr, value)
+        nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
+
+
+def add_camera_key_light(name: str, camera_obj: "bpy.types.Object", centre: Vector, diag: float) -> "bpy.types.Object":
+    """
+    Soft area key light placed in the camera's upper-left quadrant.
+
+    The key is recomputed per view rather than parented to the camera so it
+    can use the world-space `centre` for its TRACK_TO target. Position math:
+    take the camera→centre look direction, derive an orthonormal frame, then
+    offset the light "up and to the left" by ~0.6 × bbox diag. Energy scales
+    with diag so a 25 cm ledger book and an 8 m eucalyptus receive
+    comparable visible illumination.
+    """
+    light_data = bpy.data.lights.new(name=name, type="AREA")
+    light_data.energy = max(800.0, diag * 1500.0)
+    light_data.color = (1.0, 0.96, 0.88)  # 5000 K-ish, matches the warm key in render_validation
+    light_data.size = max(diag * 1.8, 1.0)
+
+    obj = bpy.data.objects.new(name=name, object_data=light_data)
+    bpy.context.collection.objects.link(obj)
+
+    cam_loc = camera_obj.location.copy()
+    direction = (centre - cam_loc).normalized()
+    # Pick a world-up reference that isn't colinear with the look direction
+    # (otherwise `right` is the zero vector for top/bottom views).
+    world_up = Vector((0.0, 0.0, 1.0))
+    if abs(direction.dot(world_up)) > 0.95:
+        world_up = Vector((0.0, 1.0, 0.0))
+    right = direction.cross(world_up).normalized()
+    up = right.cross(direction).normalized()
+    obj.location = cam_loc + (-right * diag * 0.7) + (up * diag * 0.6)
+
+    target = bpy.data.objects.new(name=f"{name}_target", object_data=None)
+    bpy.context.collection.objects.link(target)
+    target.location = centre
+    c = obj.constraints.new(type="TRACK_TO")
+    c.target = target
+    c.track_axis = "TRACK_NEGATIVE_Z"
+    c.up_axis = "UP_Y"
+    return obj
+
+
+def _setup_depth_compositor(views_dir: Path) -> "bpy.types.Node":
+    """
+    Wire a Blender 5.1 compositor that writes a single-layer 32-bit EXR
+    depth pass alongside the beauty PNG.
+
+    Blender 5.1 deltas this implementation has to respect (none of these
+    survive in the 4.x docs):
+
+      * `scene.node_tree` is gone — assign a `CompositorNodeTree` to
+        `scene.compositing_node_group` instead.
+      * `CompositorNodeComposite` is undefined — beauty comes from the
+        engine through `scene.render.filepath`, not the compositor.
+      * `CompositorNodeOutputFile.base_path` / `file_slots` are gone —
+        use `directory` + `file_output_items.new(socket_type=…)`.
+      * Node-level `format` only accepts `OPEN_EXR_MULTILAYER`; to write a
+        single-layer EXR per slot, set `item.override_node_format=True`.
+
+    Per-view filename is driven by `fo.file_name` (one global string) so the
+    caller flips it inside the render loop. Returns the File Output node so
+    the loop can update its filename without re-walking the tree.
+    """
+    scene = bpy.context.scene
+    scene.view_layers[0].use_pass_z = True
+
+    ng = bpy.data.node_groups.new(name="WitnessBakeComp", type="CompositorNodeTree")
+    scene.compositing_node_group = ng
+    rl = ng.nodes.new("CompositorNodeRLayers")
+    fo = ng.nodes.new("CompositorNodeOutputFile")
+    fo.directory = str(views_dir)
+    fo.file_name = "_unused_depth_"  # overwritten in the loop, never written as-is
+
+    depth_item = fo.file_output_items.new(socket_type="FLOAT", name="Depth")
+    depth_item.override_node_format = True
+    depth_item.format.file_format = "OPEN_EXR"
+    depth_item.format.color_depth = "32"
+    ng.links.new(rl.outputs["Depth"], fo.inputs["Depth"])
+    return fo
+
+
+def render_views(meshes: list, views_dir: Path, view_size: int, samples: int, hdri_path: Path | None = None) -> None:
+    """
+    Render the 6 canonical views with HDRI + per-camera key light.
+
+    Each iteration writes ``<view>_beauty_.png`` and ``<view>_depth_.exr``.
+    `texture_asset.normalise_view_filenames()` then renames them to
+    ``<view>.beauty.png`` / ``<view>.depth.exr`` — the names stage 2b expects.
     """
     scene = bpy.context.scene
     scene.render.resolution_x = view_size
     scene.render.resolution_y = view_size
     scene.render.resolution_percentage = 100
-    scene.render.film_transparent = True
+    scene.render.film_transparent = True  # keep alpha so SDXL can mask the bg cleanly
     scene.cycles.samples = samples
     scene.render.image_settings.file_format = "PNG"
-    # Render directly to file — avoids the compositor node tree, which
-    # requires different setup in Blender 4.x (scene.use_nodes + scene.node_tree)
-    # vs 5.x (compositing_node_group API, use_nodes deprecated). Beauty renders
-    # are all the AI projector needs; depth EXR can be layered in later.
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.image_settings.color_depth = "8"
+
     views_dir.mkdir(parents=True, exist_ok=True)
+    setup_world_environment(hdri_path)
+    centre, diag = _bbox_centre_and_diag(meshes)
+    fo = _setup_depth_compositor(views_dir)
+
     for name, offset in CANONICAL_VIEWS:
         cam = fit_camera_to_meshes(meshes, Vector(offset))
         scene.camera = cam
-        scene.render.filepath = str(views_dir / f"{name}_beauty_0001")
+        key = add_camera_key_light(f"key_{name}", cam, centre, diag)
+        fo.file_name = f"{name}_depth_"
+        scene.render.filepath = str(views_dir / f"{name}_beauty_")
         bpy.ops.render.render(write_still=True)
         bpy.data.objects.remove(cam, do_unlink=True)
-    # Output filenames match the pattern texture_asset.py expects.
+        bpy.data.objects.remove(key, do_unlink=True)
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +685,8 @@ def main() -> int:
     if not meshes:
         sys.stderr.write(f"ERROR: imported {glb_path.name} contained no meshes\n")
         return 2
+    if args.target_faces > 0:
+        decimate_meshes(meshes, args.target_faces)
     ensure_uvs(meshes)
 
     preset = families.get(family)
@@ -455,7 +695,8 @@ def main() -> int:
 
     if not args.skip_views:
         sys.stdout.write("[bake_pbr] rendering 6 canonical views\n")
-        render_views(meshes, views_dir, args.view_size, samples=args.samples)
+        hdri_path = Path(args.hdri) if args.hdri else None
+        render_views(meshes, views_dir, args.view_size, samples=args.samples, hdri_path=hdri_path)
 
     sys.stdout.write("[bake_pbr] baking Albedo (8K)\n")
     bake_channel(
@@ -488,6 +729,14 @@ def main() -> int:
         args.texture_size,
         textures_dir / f"{args.asset_id}_ao.png",
         is_data=True,
+    )
+
+    sys.stdout.write("[bake_pbr] wiring baked maps into material for GLB export\n")
+    wire_baked_material(
+        mat,
+        albedo_path=textures_dir / f"{args.asset_id}_albedo.png",
+        mr_path=textures_dir / f"{args.asset_id}_mr.png",
+        normal_path=textures_dir / f"{args.asset_id}_normal.png",
     )
 
     sys.stdout.write(f"[bake_pbr] exporting textured GLB → {output_glb}\n")

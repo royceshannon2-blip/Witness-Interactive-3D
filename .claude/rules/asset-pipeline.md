@@ -10,13 +10,15 @@ This rule is normative. If an instruction in this file conflicts with a code sug
 
 All net-new 3D content is produced locally on the RTX 5090 via the tool chain in [`tools/`](../../tools/) and the spec in [`docs/design-docs/ASSET_PIPELINE.md`](../../docs/design-docs/ASSET_PIPELINE.md). There is no fallback to cloud generators, marketplace downloads, or "fetch from a CDN at runtime."
 
-The single command that runs the full chain is:
+**The user-facing entry point is `tools/witness.py`:**
 
 ```
-python tools/asset_pipeline.py <prompt-or-source> --kind <mesh|splat|tileset|navmesh|nme|animated>
+python tools/witness.py generate <id> [--kind mesh|splat|tileset|navmesh|nme|animated]
 ```
 
-Anything you build for this project must enter through `tools/asset_pipeline.py`. Direct calls to the underlying scripts (`generate_asset.py`, `optimize_asset.py`, etc.) are fine for iteration, but the orchestrator is the canonical entry point and the only path that writes the registry.
+`witness.py` handles server management, smart ref detection, VRAM scheduling, and all pipeline flags in a single cohesive CLI. It delegates to `tools/asset_pipeline.py` internally — but `asset_pipeline.py` is not the user-facing command.
+
+Anything you build for this project must enter through `tools/witness.py generate`. Direct calls to the underlying scripts (`generate_asset.py`, `optimize_asset.py`, etc.) are fine for iteration, but `witness.py generate` is the canonical entry point and the only path that writes the registry.
 
 ---
 
@@ -28,6 +30,8 @@ The orchestrator dispatches on `--kind`. Pick the right branch — do not bolt a
 |------------|-----------------------------------------|----------|---------------------------------------------------------------|---------------|
 | `mesh`     | ref.png (hand-drop or Flux stage 0) + prompt template; ref is always refined through FLUX.2 [klein] stage 0.25 unless `--no-refine-ref` | yes | `<id>.glb` (Draco + KTX2, 3 LODs) + collision GLB | `AssetLibrary` |
 **Stage 2 AI projection is on by default.** After Hunyuan shape generation the pipeline runs `texture_asset.py --ai-project`: ComfyUI SDXL + ControlNet (depth) projects material maps from the 6 canonical views before the Blender Cycles PBR bake. Pass `--no-ai-project` to skip (procedural bake only, faster, lower quality).
+
+**Multi-view input (stage 0.5) is default-on for `mesh|animated`.** The ref is background-removed + framed (rembg + `frame_subject`), then either Zero123++ synthesises 6 views, OR — when real photos are supplied via `--real-views <dir>` (auto-detected at `prompts/asset-templates/<id>/real_views/`) — those captures are staged directly and synthesis is skipped. Real angles beat synthesised ones for all-angle accuracy and are the preferred path for posed/specific assets (e.g. first-person hands, where the FLUX text prior won't render a dorsal pose). All views pass Gate 1 (per-view pixel + all-view CLIP + cross-view colour) before the Hunyuan ensemble. `--no-multi-view` opts out (single-image Hunyuan). **Requires `rembg`+`onnxruntime` in the ComfyUI venv**, or background removal no-ops with a loud warning and the slab artefact returns.
 | `splat`    | `.ply` / `.splat` / `.spz` capture      | no       | normalised `<id>.spz` (or `.ply`) + bounding box + thumbnail  | `SplatLibrary` |
 | `tileset`  | 3D Tiles root URL or local tileset.json | no       | registered `<id>.tileset.json` reference                      | `TilesetMount` |
 | `navmesh`  | terrain/ground GLB(s)                   | no       | `<id>.nav.bin` (RecastJSPlugin output)                        | runtime build via `engine/Navigation.ts` (deferred) |
@@ -106,7 +110,23 @@ If any box is unchecked, the asset is not "wired" and the task is not done.
 
 ---
 
-## 7. Crosslinks
+## 7. CLI-GUI Parity Rule
+
+**Any new flag, option, or subcommand added to `tools/witness.py` must also be exposed in the asset generation GUI.**
+
+This is a mandatory requirement, not optional. The CLI and GUI are dual interfaces to the same pipeline, and they must remain synchronized:
+
+- When you add a flag like `--no-ai-project` or `--multi-view` to the CLI, the GUI must present the corresponding control (checkbox, dropdown, toggle, etc.).
+- When you add a new `--kind` variant or generation mode, the GUI must support it as a selectable option.
+- GUI stubs that say "TBD" or "not yet wired" are a blocker for CLI feature merges.
+
+**Location:** The GUI lives in `witness-interactive-vite/src/ui/` (or its logical equivalent). Check `ARCHITECTURE.md` for the current UI module structure.
+
+**Why:** Users should never discover that a CLI feature "isn't available in the GUI yet." The two interfaces are equally canonical; feature parity is release quality, not polish.
+
+---
+
+## 8. Crosslinks
 
 - [`docs/design-docs/ASSET_PIPELINE.md`](../../docs/design-docs/ASSET_PIPELINE.md) — full pipeline spec (stages, naming, failure modes).
 - [`docs/design-docs/RENDERING.md`](../../docs/design-docs/RENDERING.md) §3 — material library contract.

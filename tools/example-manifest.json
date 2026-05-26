@@ -1,0 +1,20 @@
+[
+  {
+    "image": "assets/source/generated/jerrycan.png",
+    "name": "Jerrycan",
+    "era": "past",
+    "steps": 50
+  },
+  {
+    "image": "assets/source/generated/bicycle.png",
+    "name": "Bicycle",
+    "era": "past",
+    "steps": 50
+  },
+  {
+    "image": "assets/source/generated/cooking_pot.png",
+    "name": "CookingPot",
+    "era": "shared",
+    "steps": 50
+  }
+]

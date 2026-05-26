@@ -25,43 +25,62 @@ pgrep -af "ComfyUI/main.py" || echo "not running — see §5 to start"
 python3 -c "import requests"               # generate_ref_image.py dependency
 ```
 
-**VRAM coordination with Hunyuan.** Flux.1 [dev] at fp8_e4m3fn peaks
-~14 GB at 1024² and ~22 GB at 1536² (hero workflow). The Hunyuan container
-holds ~8–10 GB idle and ~20 GB during a generate call. Two coexistence
-patterns:
+**VRAM coordination — automated.** `asset_pipeline.py` now calls
+`POST /free` (`{"unload_models": true, "free_memory": true}`) at each
+stage boundary to evict the previous stage's models before the next
+one loads. Specific eviction points:
 
-- **Sequential (recommended, default).** Stop the Hunyuan container
-  before running Flux, then restart it after the ref images are ready.
-  `tools/asset_pipeline.py --auto-ref` does **not** stop Hunyuan
-  automatically — the operator does it. This is the safe default for
-  batch runs because Flux at hero resolution would OOM otherwise.
-- **Concurrent (default workflow only).** Both servers running.
-  Hunyuan idle (~8 GB) + Flux default at 1024² (~14 GB) ≈ 22 GB on a
-  32 GB card. Works, but a simultaneous Hunyuan generate spike can push
-  past the limit. Acceptable for single-asset iteration; risky for batch.
+| Before | Why |
+|---|---|
+| Stage 1 (Hunyuan, ~20 GB) | Flush Flux/FLUX.2 models (~9–22 GB) so Hunyuan has headroom |
+| Stage 2c UV reproject (Blender) | Flush SDXL (~10 GB) so Blender Cycles has VRAM |
+
+Both servers can stay running throughout a full pipeline run.
+The only case that still requires manual intervention is a **hero-workflow**
+stage 0 at 1536² (~22 GB) overlapping with a simultaneous Hunyuan generate
+spike — the automated flush fires before Hunyuan starts, so the window is
+closed in practice. If you see OOM during stage 0 itself (not at the
+boundary), stop Hunyuan manually first:
+
+```fish
+docker stop witness-hunyuan  # before a hero-workflow stage 0 run
+```
 
 ---
 
 ## 1. Model layout
 
-All models live under `~/ComfyUI/models/`. The Flux models are already
-downloaded. The SDXL depth ControlNet is still needed for stage 2b (see §5b).
+Models are spread across `~/ComfyUI/models/` in the paths ComfyUI was configured to scan.
+Note: some directories use non-standard names (`text_encoders/`, `diffusion_models/`) because
+ComfyUI was set up before the project conventions were finalised.
 
 ```
 ~/ComfyUI/models/
 ├── checkpoints/
-│   └── sd_xl_base_1.0.safetensors    #  6.5 GB — SDXL (stage 2b) ✅
-├── unet/
-│   └── flux1-dev.safetensors          # 11.9 GB — Flux.1 [dev] (stage 0) ✅
-├── clip/
-│   ├── clip_l.safetensors             #  246 MB — OpenCLIP-L ✅
-│   ├── t5xxl_fp8_e4m3fn.safetensors   #  4.9 GB — fp8 T5-XXL (default workflow) ✅
-│   └── t5xxl_fp16.safetensors         #  9.8 GB — fp16 T5-XXL (hero workflow) ✅
+│   ├── sd_xl_base_1.0.safetensors              #  6.5 GB — SDXL base (stage 2b) ✅
+│   ├── stable-audio-open-1.0.safetensors        #  4.6 GB — audio (not yet integrated)
+│   └── ltxv-13b-0.9.8-dev.safetensors (symlink) # 27.0 GB — video (not yet integrated)
+├── diffusion_models/
+│   └── flux-2-klein-base-9b-fp8.safetensors     #  9.0 GB — FLUX.2 [klein] UNet (stage 0.25) ✅
+├── text_encoders/
+│   ├── qwen_3_8b_fp8mixed.safetensors           #  8.1 GB — Qwen text encoder (stage 0.25) ✅
+│   ├── t5xxl_fp16.safetensors (symlink)          #  9.2 GB — T5-XXL fp16 (available) ✅
+│   └── t5_base.safetensors                       #  851 MB — T5 base (available) ✅
 ├── vae/
-│   └── ae.safetensors                 #  320 MB — Flux VAE ✅
+│   └── flux2-vae.safetensors                    #  321 MB — FLUX.2 VAE (stage 0.25) ✅
 └── controlnet/
-    └── controlnet-depth-sdxl-1.0.safetensors  # 2.5 GB — depth ControlNet ⬜ needed
+    └── controlnet-depth-sdxl-1.0.safetensors    #  2.4 GB — depth ControlNet (stage 2b) ✅
 ```
+
+**Stage 0 (Flux.1 [dev] ref image generation) is not yet active** — the following models
+still need to be downloaded:
+
+| Model | Size | Target path |
+|---|---|---|
+| `flux1-dev.safetensors` | 11.9 GB | `~/ComfyUI/models/unet/flux1-dev.safetensors` |
+| `ae.safetensors` (Flux VAE) | 320 MB | `~/ComfyUI/models/vae/ae.safetensors` |
+| `clip_l.safetensors` | 246 MB | `~/ComfyUI/models/clip/clip_l.safetensors` |
+| `t5xxl_fp8_e4m3fn.safetensors` | 4.9 GB | `~/ComfyUI/models/clip/t5xxl_fp8_e4m3fn.safetensors` |
 
 If you need to re-download the Flux models (HuggingFace gated — accept the licence first):
 
@@ -103,33 +122,35 @@ If `/system_stats` returns JSON, the server is ready for stage 0.
 
 ## 4. Run stage 0 against the server
 
-### Single asset (re-use the eucalyptus seed from frontmatter):
+### Full pipeline (recommended — uses `witness.py`):
 
-```bash
-cd /home/royce3/Desktop/Witness-Interactive-3D
-
-python tools/generate_ref_image.py vegetation_eucalyptus_mature --seed 481109
-# writes prompts/asset-templates/vegetation_eucalyptus_mature/ref.png
-```
-
-### Hero asset (high-fidelity, prefer hero workflow):
-
-```bash
-python tools/generate_ref_image.py prop_ledger_book --workflow hero --seed 481110
-# 1536² / 40 steps — costs ~2 min on the 5090; stop Hunyuan first.
-```
-
-### Full pipeline (auto-ref + Hunyuan in one call):
-
-```bash
-python tools/asset_pipeline.py prop_ledger_book --kind mesh --auto-ref --era shared
-# Stage 0 generates ref.png if missing; stage 1+ proceeds as before.
-```
-
-### Batch all Phase 1 assets that lack a ref.png:
+`witness generate` automatically runs stage 0 when no ref.png exists:
 
 ```fish
-for id in \
+cd /home/royce3/Desktop/Witness-Interactive-3D
+
+# Generates ref.png via Flux.1 [dev], then continues through all stages
+python tools/witness.py generate prop_ledger_book
+
+# Hero ref (1536² / 40 steps) — ComfyUI peaks ~22 GB; stop Hunyuan first
+python tools/witness.py generate prop_ledger_book --auto-ref-workflow hero
+```
+
+### Stage 0 only (for manual ref review before committing to full pipeline):
+
+```bash
+# Single asset
+python tools/generate_ref_image.py vegetation_eucalyptus_mature --seed 481109
+# writes prompts/asset-templates/vegetation_eucalyptus_mature/ref.png
+
+# Force regenerate
+python tools/generate_ref_image.py prop_ledger_book --workflow hero --seed 481110 --force
+```
+
+### Batch all Phase 1 assets via witness.py:
+
+```fish
+python tools/witness.py batch \
   structure_rugo_main_house \
   structure_rugo_tin_roof \
   structure_rugo_door \
@@ -143,9 +164,6 @@ for id in \
   prop_ledger_book \
   prop_altar_photo_frame \
   prop_altar_candle
-    echo "── $id ──"
-    python tools/generate_ref_image.py $id; or echo "FAIL $id"
-end
 ```
 
 ---
@@ -179,12 +197,19 @@ tail -f /tmp/comfyui.log
 
 ---
 
-## 5b. Stage 2b — SDXL + depth ControlNet texture projection
+## 5b. Stage 2b — FLUX.2 [klein] img2img PBR projection
 
 Stage 2b runs automatically as part of `asset_pipeline.py` (enabled by default,
 skip with `--no-ai-project`). It calls `tools/texture_asset.py --ai-project`,
-which submits `prompts/_pbr_workflows/sdxl_depth_pbr.json` to ComfyUI for each
+which submits `prompts/_pbr_workflows/flux2_klein_pbr.json` to ComfyUI for each
 of the 6 canonical view renders produced by `bake_pbr.py`.
+
+Phase D (2026-05-22) replaced the previous SDXL + depth-ControlNet workflow
+with FLUX.2 [klein]. FLUX.2's much stronger prompt adherence is the reason for
+the swap. The trade-off: no FLUX-compatible depth ControlNet is installed
+locally, so depth conditioning is delegated to the beauty render itself —
+`bake_pbr.py` (Phase C) emits beauty renders lit with an HDRI + per-camera key,
+encoding geometry through shading. The VAE-encoded beauty seeds img2img.
 
 ### Model layout
 
@@ -192,56 +217,39 @@ These must exist under `~/ComfyUI/models/` before the first stage 2b run:
 
 | File | Size | Status | Source |
 |---|---|---|---|
-| `checkpoints/sd_xl_base_1.0.safetensors` | 6.5 GB | ✅ present | `stabilityai/stable-diffusion-xl-base-1.0` |
-| `controlnet/controlnet-depth-sdxl-1.0.safetensors` | 2.5 GB | ⬜ needed | `xinsir/controlnet-depth-sdxl-1.0` |
-
-### Download the missing ControlNet
-
-```fish
-huggingface-cli download xinsir/controlnet-depth-sdxl-1.0 \
-  diffusion_pytorch_model.safetensors \
-  --repo-type model \
-  --local-dir /tmp/controlnet-depth-sdxl/
-
-mv /tmp/controlnet-depth-sdxl/diffusion_pytorch_model.safetensors \
-   ~/ComfyUI/models/controlnet/controlnet-depth-sdxl-1.0.safetensors
-
-# Restart ComfyUI so it scans the new file
-pkill -f "ComfyUI/main.py"
-/home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
-  --listen 127.0.0.1 --port 8188 > /tmp/comfyui.log 2>&1 &
-disown
-while not curl -sf http://localhost:8188/system_stats >/dev/null 2>&1
-  sleep 2
-end
-echo "ready"
-
-# Verify
-curl -sf http://localhost:8188/object_info/ControlNetLoader | \
-  python3 -c "import sys,json; nets=json.load(sys.stdin)['ControlNetLoader']['input']['required']['control_net_name'][0]; print('\n'.join(nets))"
-# Expect: controlnet-depth-sdxl-1.0.safetensors
-```
+| `diffusion_models/flux-2-klein-base-9b-fp8.safetensors` | ~9 GB | ✅ present | Black Forest Labs |
+| `clip/clip_l.safetensors` | 240 MB | ✅ present | OpenAI CLIP-L |
+| `clip/t5xxl_fp8_e4m3fn.safetensors` | 4.9 GB | ✅ present | Google T5-XXL fp8 |
+| `vae/flux2-vae.safetensors` | ~330 MB | ✅ present | Black Forest Labs |
 
 ### What stage 2b does
 
 For each of the 6 canonical views (front / back / left / right / top / bottom):
 
-1. Uploads the beauty PNG from `processed/views/<id>/` to ComfyUI.
-2. Submits the SDXL workflow: beauty image as reference + depth EXR as ControlNet
-   conditioning + the asset's prompt template as the text guide.
-3. Downloads the projected PBR diffuse map back as `<view>.pbr.png`.
-4. `bake_pbr.py` uses these projected maps as the albedo source at bake time,
-   replacing the procedural fallback.
+1. Uploads `<view>.beauty.png` from `processed/views/<id>/` to ComfyUI.
+2. Uploads `<view>.depth.exr` if present (held for future depth-CN swap; the
+   current workflow does not consume it).
+3. Submits the FLUX.2 klein workflow: VAE-encodes the beauty PNG as the
+   starting latent, runs img2img at `--ai-project-denoise` (default 0.62)
+   under FluxGuidance 3.5, 28 steps, sampler euler/simple, per-view seed
+   = `--ai-project-seed` + view_index.
+4. Downloads the projected PBR diffuse map back as `<view>.pbr.png`.
+5. Stage 2c (`reproject_views.py`) projects all six PBR maps onto the mesh UV
+   to produce the final 8K albedo, replacing the procedural fallback.
 
-**When depth EXR is absent** (current state — Blender 5.1 compositor API in flux):
-the workflow runs using the beauty image as the ControlNet input instead.
-Depth conditioning will be restored once `bake_pbr.py`'s EXR output is fixed.
+### Tunable flags
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--ai-project-seed` | 481109 | Base seed; per-view seed = base + view_idx. |
+| `--ai-project-denoise` | 0.62 | 0.55 preserves more procedural shading, 0.70 gives FLUX more material authority. |
 
 ### VRAM budget
 
-SDXL base at 1024² draws ~10 GB. Hunyuan idles at ~8 GB. Total ≈ 18 GB — safe
-on the RTX 5090 (32 GB). Stage 2b runs after stage 1 (Hunyuan) finishes, so
-there is no simultaneous heavy load.
+FLUX.2 klein fp8 at 1024² draws ~14 GB (9 GB UNET + dual CLIP + VAE + activations).
+Hunyuan idles at ~8 GB. Total ≈ 22 GB — safe on the RTX 5090 (32 GB). Stage 2b
+runs after stage 1 (Hunyuan) finishes, so there is no simultaneous heavy load.
+`flush_comfy_vram()` is still called before Blender UV reproject launches.
 
 ---
 
@@ -274,39 +282,32 @@ there is no simultaneous heavy load.
 ## 8. Quick reference card
 
 ```fish
-# Start ComfyUI (bare-metal, persists after terminal close)
+# ── Server management (use witness.py) ───────────────────────────────────────
+python tools/witness.py start              # start ComfyUI + Hunyuan3D
+python tools/witness.py start --no-hunyuan # ComfyUI only
+python tools/witness.py stop               # stop both
+python tools/witness.py status             # health + model inventory
+
+# ── Asset generation ─────────────────────────────────────────────────────────
+python tools/witness.py generate <id>                          # full pipeline, all models
+python tools/witness.py generate <id> --fast                   # skip SDXL projection
+python tools/witness.py generate <id> --multi-view             # Zero123++ shape views
+python tools/witness.py generate <id> --refine-strength 0.35   # override FLUX.2 denoise
+python tools/witness.py generate <id> --no-refine-ref          # skip FLUX.2 pass
+python tools/witness.py generate <id> --auto-ref-workflow hero # 1536² Flux ref
+python tools/witness.py batch <id1> <id2> <id3>               # sequential batch
+
+# ── Manual ComfyUI control (if not using witness.py) ─────────────────────────
 /home/royce3/ComfyUI/venv/bin/python /home/royce3/ComfyUI/main.py \
   --listen 127.0.0.1 --port 8188 > /tmp/comfyui.log 2>&1 &
 disown
 while not curl -sf http://localhost:8188/system_stats >/dev/null 2>&1; sleep 2; end
 echo "ready"
+pkill -f "ComfyUI/main.py"   # stop
 
-# Stop
-pkill -f "ComfyUI/main.py"
-
-# Health
-curl -s http://localhost:8188/system_stats >/dev/null && echo OK
-
-# Single ref image (stage 0, default workflow)
-python tools/generate_ref_image.py <id> --seed <n>
-
-# Hero ref (1536² / 40 steps — stop Hunyuan first)
-python tools/generate_ref_image.py <id> --workflow hero --seed <n>
-
-# Full pipeline — shape + AI-projected PBR bake (default)
-python tools/asset_pipeline.py <id> --kind mesh --era <era>
-
-# Full pipeline — skip SDXL projection (faster, procedural bake only)
-python tools/asset_pipeline.py <id> --kind mesh --era <era> --no-ai-project
-
-# Texture only (re-bake existing raw GLB with AI projection)
+# ── Texture only (re-bake existing raw GLB) ───────────────────────────────────
 python tools/texture_asset.py <id> \
   --glb processed/glb/raw/<id>.glb \
   --family <leather|wood|stone|cloth|mud_brick|tin|wax|skin|vegetation> \
-  --texture-size 4096 \
-  --ai-project
-
-# Texture only — skip view renders (reuse existing processed/views/<id>/)
-python tools/texture_asset.py <id> --glb processed/glb/raw/<id>.glb \
-  --family <family> --texture-size 4096 --ai-project --skip-views
+  --texture-size 4096 --ai-project
 ```

@@ -1,0 +1,72 @@
+{
+  "asset_id": "figure_grandfather_hands",
+  "glb_path": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/figure_grandfather_hands.glb",
+  "valid": true,
+  "failures": [],
+  "warnings": [
+    "mesh is non-watertight (open edges present) \u2014 acceptable for open-form assets"
+  ],
+  "metrics": {
+    "bbox_extents": [
+      0.892219066619873,
+      1.9949678182601929,
+      0.9931735694408417
+    ],
+    "bbox_depth_ratio": 0.44723481674906185,
+    "bbox_depth_threshold": 0.1,
+    "vertex_count": 322612,
+    "face_count": 645234,
+    "face_target": 40000,
+    "raw_poly_cap": 2000000,
+    "face_budget_low": 20000,
+    "centroid": [
+      0.13512717722545392,
+      -0.01979512872157152,
+      -0.15654327804954857
+    ],
+    "centroid_offset_ratios": [
+      0.06773401354579145,
+      0.009922530348802723,
+      0.07846907434630682
+    ],
+    "centroid_offset_threshold": 0.3,
+    "manifold": false
+  },
+  "ensemble": {
+    "size": 3,
+    "base_seed": 491109,
+    "winning_seed": 491109,
+    "candidates": [
+      {
+        "seed": 491109,
+        "glb": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/.ensemble/figure_grandfather_hands/seed_491109.glb",
+        "valid": false,
+        "score": -Infinity,
+        "metrics": {},
+        "failures": [
+          "trimesh failed to load GLB: No module named 'trimesh'"
+        ]
+      },
+      {
+        "seed": 491110,
+        "glb": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/.ensemble/figure_grandfather_hands/seed_491110.glb",
+        "valid": false,
+        "score": -Infinity,
+        "metrics": {},
+        "failures": [
+          "trimesh failed to load GLB: No module named 'trimesh'"
+        ]
+      },
+      {
+        "seed": 491111,
+        "glb": "/home/royce3/Desktop/Witness-Interactive-3D/processed/glb/raw/.ensemble/figure_grandfather_hands/seed_491111.glb",
+        "valid": false,
+        "score": -Infinity,
+        "metrics": {},
+        "failures": [
+          "trimesh failed to load GLB: No module named 'trimesh'"
+        ]
+      }
+    ]
+  }
+}

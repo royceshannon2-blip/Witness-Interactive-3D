@@ -1,0 +1,81 @@
+{
+  "asset_id": "figure_grandfather_hands",
+  "views_dir": "/tmp/cvtest_zu9v31p0",
+  "valid": true,
+  "failures": [],
+  "warnings": [],
+  "per_view": [
+    {
+      "name": "view_0",
+      "path": "/tmp/cvtest_zu9v31p0/view_0.png",
+      "width": 1536,
+      "height": 1536,
+      "luminance_mean": 0.46995604038238525,
+      "luminance_std": 0.22540231049060822,
+      "coverage": 0.9684770372178819,
+      "foreground_rgb": [
+        0.49996012449264526,
+        0.4615460932254791,
+        0.4377892017364502
+      ],
+      "background_rgba": [
+        0.5310714840888977,
+        0.5527721643447876,
+        0.5415560603141785,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_1",
+      "path": "/tmp/cvtest_zu9v31p0/view_1.png",
+      "width": 1536,
+      "height": 1536,
+      "luminance_mean": 0.41128602623939514,
+      "luminance_std": 0.18115992844104767,
+      "coverage": 0.8432549370659722,
+      "foreground_rgb": [
+        0.441609650850296,
+        0.3846123218536377,
+        0.3545745313167572
+      ],
+      "background_rgba": [
+        0.497146338224411,
+        0.5008431673049927,
+        0.4849773347377777,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    },
+    {
+      "name": "view_2",
+      "path": "/tmp/cvtest_zu9v31p0/view_2.png",
+      "width": 512,
+      "height": 512,
+      "luminance_mean": 0.539238452911377,
+      "luminance_std": 0.22036655247211456,
+      "coverage": 0.9168891906738281,
+      "foreground_rgb": [
+        0.46992364525794983,
+        0.5464522838592529,
+        0.636545717716217
+      ],
+      "background_rgba": [
+        0.5206425786018372,
+        0.5864916443824768,
+        0.663359522819519,
+        1.0
+      ],
+      "clip_score": null,
+      "failures": []
+    }
+  ],
+  "aggregate": {
+    "luminance_mean_across_views": 0.47349350651105243,
+    "luminance_std_across_views": 0.05229621479464087,
+    "luminance_std_threshold": 0.15,
+    "fg_colour_note": "cross-view colour check skipped: 3 foreground view(s) < 5 needed for a stable consensus"
+  }
+}

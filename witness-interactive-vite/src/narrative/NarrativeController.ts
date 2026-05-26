@@ -1,5 +1,6 @@
-import { globalState, GameState } from './StateManager';
-import { actionBus, NarrativeAction, setupDefaultActions } from './Actions';
+import { globalState } from './StateManager';
+import type { GameState } from './StateManager';
+import { actionBus, setupDefaultActions } from './Actions';
 
 interface NarrativeEvent {
   type: 'stateChanged' | 'puzzleSolved' | 'branchUnlocked' | 'endingReached';
@@ -100,6 +101,13 @@ export class NarrativeController {
     this.notifyListeners({
       type: 'stateChanged',
       data: this.getGameState(),
+    });
+  }
+
+  onGameComplete(path: string, memorialization: string): void {
+    this.notifyListeners({
+      type: 'endingReached',
+      data: { path, memorialization },
     });
   }
 }

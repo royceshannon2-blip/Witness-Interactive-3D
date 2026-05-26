@@ -56,7 +56,14 @@ def submit(image_b64: str, args, server: str, view_b64_list: list[str] | None = 
         "texture":             args.texture,
         "seed":                args.seed,
         "octree_resolution":   args.octree_resolution,
-        "num_inference_steps": min(args.steps, 20),   # API max is 20
+        # No upstream cap exists. The "API max is 20" comment removed
+        # here was a documentation artefact; api_server.py and the
+        # patched model_worker pass num_inference_steps straight to the
+        # pipeline, whose own default is 50 (see
+        # hy3dshape/pipelines.py:561). Triple-A quality runs use 50–80
+        # — the orchestrator's --steps default is now 50 (see
+        # asset_pipeline.py argparse).
+        "num_inference_steps": args.steps,
         "guidance_scale":      args.guidance_scale,
         "num_chunks":          args.num_chunks,
         "face_count":          args.face_count,
@@ -129,16 +136,26 @@ def main():
     p = argparse.ArgumentParser(description="Generate GLB from ref image via Hunyuan3D 2.1")
     p.add_argument("image_path",  help="Path to reference image (PNG/JPG)")
     p.add_argument("asset_id",    help="Asset id, e.g. prop_ledger_book")
-    p.add_argument("--steps",           type=int,   default=20,
-                   help="Inference steps 1-20 (default 20)")
+    p.add_argument("--steps",           type=int,   default=50,
+                   help="Inference steps. Default 50 = upstream "
+                        "hy3dshape pipeline default (no API cap exists). "
+                        "Triple-A quality target: 50–80.")
     p.add_argument("--seed",            type=int,   default=1234)
     p.add_argument("--octree-resolution", dest="octree_resolution",
-                   type=int, default=256,
-                   help="Octree resolution 64-512 (default 256; 512 for hero assets)")
+                   type=int, default=512,
+                   help="Octree resolution. Default 512 (was 256). "
+                        "Higher = finer geometric detail at the cost of "
+                        "VRAM. 5090 32 GB tolerates 512 across the "
+                        "Phase 1 asset set; raise to 768 for hero figures "
+                        "if the GPU stays under 28 GB.")
     p.add_argument("--texture",         action="store_true", default=False,
                    help="Enable Hunyuan texture pass (default off; PBR baked separately)")
     p.add_argument("--guidance-scale",  dest="guidance_scale",
-                   type=float, default=5.0)
+                   type=float, default=8.0,
+                   help="Classifier-free guidance scale. Default 8.0 "
+                        "(was 5.0). Higher = stronger prompt adherence; "
+                        "8.0 chosen to push Hunyuan harder on hero "
+                        "assets where 5.0 collapsed to depth-card output.")
     p.add_argument("--num-chunks",      dest="num_chunks",
                    type=int,   default=8000)
     p.add_argument("--face-count",      dest="face_count",
@@ -174,9 +191,10 @@ def main():
     print("━" * 56)
     print(f"  Image:      {image_path}")
     print(f"  Asset id:   {args.asset_id}")
-    print(f"  Steps:      {min(args.steps, 20)} (API max 20)")
+    print(f"  Steps:      {args.steps}")
     print(f"  Seed:       {args.seed}")
     print(f"  Octree res: {args.octree_resolution}")
+    print(f"  Guidance:   {args.guidance_scale}")
     print(f"  Texture:    {args.texture}")
     print(f"  Output:     {output_path}")
     print("━" * 56)

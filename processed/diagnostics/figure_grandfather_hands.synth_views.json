@@ -1,0 +1,173 @@
+{
+  "asset_id": "figure_grandfather_hands",
+  "views_dir": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views",
+  "valid": false,
+  "failures": [
+    "[view_1] CLIP semantic gate: P(asset)=0.01 < 0.4 \u2014 view reads more like \"a smooth featureless placeholder block with no surface detail\" than the asset prompt",
+    "[view_3] CLIP semantic gate: P(asset)=0.28 < 0.4 \u2014 view reads more like \"a blank untextured grey 3D primitive\" than the asset prompt",
+    "[view_4] object coverage 0.071 below floor 0.1 \u2014 view shows a sliver of the mesh, likely an edge-on view of a flat depth-card",
+    "[view_4] CLIP semantic gate: P(asset)=0.01 < 0.4 \u2014 view reads more like \"a corrupted distorted 3D render with no recognizable subject\" than the asset prompt",
+    "[view_5] CLIP semantic gate: P(asset)=0.02 < 0.4 \u2014 view reads more like \"a corrupted distorted 3D render with no recognizable subject\" than the asset prompt"
+  ],
+  "warnings": [
+    "[view_1] foreground colour diverges (L1 0.39 from the other views' consensus) \u2014 view may show a different subject/background; check multi-view coherence",
+    "[view_3] foreground colour diverges (L1 0.91 from the other views' consensus) \u2014 view may show a different subject/background; check multi-view coherence"
+  ],
+  "per_view": [
+    {
+      "name": "view_0",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views/view_0.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5071313381195068,
+      "luminance_std": 0.2410767823457718,
+      "coverage": 0.9960093896713615,
+      "foreground_rgb": [
+        0.5256178975105286,
+        0.5038066506385803,
+        0.48369622230529785
+      ],
+      "background_rgba": [
+        0.5857981443405151,
+        0.5755830407142639,
+        0.564700722694397,
+        1.0
+      ],
+      "clip_score": 0.687610387802124,
+      "failures": []
+    },
+    {
+      "name": "view_1",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views/view_1.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.6495425701141357,
+      "luminance_std": 0.10850460082292557,
+      "coverage": 0.9992370892018779,
+      "foreground_rgb": [
+        0.652841329574585,
+        0.6499008536338806,
+        0.6435161828994751
+      ],
+      "background_rgba": [
+        0.5848488211631775,
+        0.5756035447120667,
+        0.5648669004440308,
+        1.0
+      ],
+      "clip_score": 0.005678286775946617,
+      "failures": [
+        "CLIP semantic gate: P(asset)=0.01 < 0.4 \u2014 view reads more like \"a smooth featureless placeholder block with no surface detail\" than the asset prompt"
+      ]
+    },
+    {
+      "name": "view_2",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views/view_2.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5221056342124939,
+      "luminance_std": 0.24620254337787628,
+      "coverage": 0.9972711267605634,
+      "foreground_rgb": [
+        0.5305591821670532,
+        0.5208120346069336,
+        0.508886992931366
+      ],
+      "background_rgba": [
+        0.6044431924819946,
+        0.6008561253547668,
+        0.5942690372467041,
+        1.0
+      ],
+      "clip_score": 0.9116041660308838,
+      "failures": []
+    },
+    {
+      "name": "view_3",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views/view_3.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5686863660812378,
+      "luminance_std": 0.20979903638362885,
+      "coverage": 0.2289906103286385,
+      "foreground_rgb": [
+        0.27130797505378723,
+        0.2199636548757553,
+        0.17438507080078125
+      ],
+      "background_rgba": [
+        0.6432399749755859,
+        0.6410225033760071,
+        0.6369056701660156,
+        1.0
+      ],
+      "clip_score": 0.2757302522659302,
+      "failures": [
+        "CLIP semantic gate: P(asset)=0.28 < 0.4 \u2014 view reads more like \"a blank untextured grey 3D primitive\" than the asset prompt"
+      ]
+    },
+    {
+      "name": "view_4",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views/view_4.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.6647788882255554,
+      "luminance_std": 0.05760657787322998,
+      "coverage": 0.07053990610328638,
+      "foreground_rgb": [
+        0.5920055508613586,
+        0.5741485357284546,
+        0.5543214678764343
+      ],
+      "background_rgba": [
+        0.6432413458824158,
+        0.633904218673706,
+        0.6225540041923523,
+        1.0
+      ],
+      "clip_score": 0.013688034377992153,
+      "failures": [
+        "object coverage 0.071 below floor 0.1 \u2014 view shows a sliver of the mesh, likely an edge-on view of a flat depth-card",
+        "CLIP semantic gate: P(asset)=0.01 < 0.4 \u2014 view reads more like \"a corrupted distorted 3D render with no recognizable subject\" than the asset prompt"
+      ]
+    },
+    {
+      "name": "view_5",
+      "path": "/home/royce3/Desktop/Witness-Interactive-3D/prompts/asset-templates/figure_grandfather_hands/views/view_5.png",
+      "width": 213,
+      "height": 480,
+      "luminance_mean": 0.5243366360664368,
+      "luminance_std": 0.23213793337345123,
+      "coverage": 0.9954714397496087,
+      "foreground_rgb": [
+        0.5447911024093628,
+        0.5203434824943542,
+        0.5010290145874023
+      ],
+      "background_rgba": [
+        0.6063904166221619,
+        0.5933753252029419,
+        0.5794933438301086,
+        1.0
+      ],
+      "clip_score": 0.017221510410308838,
+      "failures": [
+        "CLIP semantic gate: P(asset)=0.02 < 0.4 \u2014 view reads more like \"a corrupted distorted 3D render with no recognizable subject\" than the asset prompt"
+      ]
+    }
+  ],
+  "aggregate": {
+    "luminance_mean_across_views": 0.572763572136561,
+    "luminance_std_across_views": 0.0627128927315368,
+    "luminance_std_threshold": 0.15,
+    "fg_colour_median": [
+      0.537675142288208,
+      0.5205777883529663,
+      0.5049580335617065
+    ],
+    "fg_colour_divergence_max": 0.9088334441184998,
+    "fg_colour_divergence_threshold": 0.22,
+    "clip_prompt": "A pair of bare hands and forearms suitable for a first-person camera rig: visible from mid-forearm to fingertips.",
+    "clip_real_prob_floor": 0.4
+  }
+}
